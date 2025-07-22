@@ -1,0 +1,172 @@
+version: '3.8'
+
+services:
+  # FastAPI Application
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_video_api
+    restart: always
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SENTRY_DSN=${SENTRY_DSN}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+      - ./temp:/app/temp
+    depends_on:
+      - db
+      - redis
+    networks:
+      - ai_video_network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # Celery Worker with autoscaling
+  celery_worker:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_video_celery_worker
+    restart: always
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - C_FORCE_ROOT=true
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+      - ./temp:/app/temp
+    depends_on:
+      - db
+      - redis
+    networks:
+      - ai_video_network
+    command: celery -A tasks worker --loglevel=info --concurrency=4 --autoscale=8,2
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+  # Celery Beat (Scheduler)
+  celery_beat:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_video_celery_beat
+    restart: always
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      - db
+      - redis
+    networks:
+      - ai_video_network
+    command: celery -A tasks beat --loglevel=info
+
+  # PostgreSQL Database with replication support
+  db:
+    image: postgres:15-alpine
+    container_name: ai_video_db
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-ai_video_tool}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - ai_video_network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+
+  # Redis with persistence
+  redis:
+    image: redis:7-alpine
+    container_name: ai_video_redis
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - ai_video_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+  # Nginx (Reverse Proxy) with SSL
+  nginx:
+    image: nginx:alpine
+    container_name: ai_video_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.prod.conf:/etc/nginx/nginx.conf
+      - ./static:/usr/share/nginx/html/static
+      - ./outputs:/usr/share/nginx/html/outputs
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    depends_on:
+      - api
+    networks:
+      - ai_video_network
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+
+  # Certbot for SSL certificates
+  certbot:
+    image: certbot/certbot
+    container_name: ai_video_certbot
+    restart: unless-stopped
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+  # Flower for Celery monitoring (optional)
+  flower:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_video_flower
+    restart: always
+    environment:
+      - CELERY_BROKER_URL=${REDIS_URL}
+      - CELERY_RESULT_BACKEND=${REDIS_URL}
+    command: celery -A tasks flower --port=5555 --url_prefix=flower
+    networks:
+      - ai_video_network
+    depends_on:
+      - redis
+
+networks:
+  ai_video_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

@@ -1,0 +1,7 @@
+This is a test script for AI image generation.
+
+Scene 1: A beautiful sunset over the mountains
+Scene 2: A person walking through a forest
+Scene 3: A city skyline at night
+Scene 4: A peaceful lake with mountains in the background
+Scene 5: A cozy cabin in the woods 

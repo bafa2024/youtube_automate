@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(python:*)",
+      "Bash(move video_processor.py video_processor_original.py)",
+      "Bash(move audio_processor.py audio_processor_original.py)",
+      "Bash(move api_manager.py api_manager_original.py)",
+      "Bash(move openai_generator.py openai_generator_original.py)"
+    ],
+    "deny": []
+  }
+}
