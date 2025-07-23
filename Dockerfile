@@ -1,5 +1,11 @@
 # Multi-stage build for optimized image
-FROM python:3.10-slim as builder
+FROM python:3.13-slim as builder
+
+# Set environment variables for better pip behavior
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -7,17 +13,24 @@ RUN apt-get update && apt-get install -y \
     g++ \
     build-essential \
     libpq-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip wheel --no-cache-dir --no-deps --wheel-dir /wheels -r requirements.txt
+# Install Python dependencies with retry mechanism
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --no-deps --wheel-dir /wheels -r requirements.txt
 
 # Final stage
-FROM python:3.10-slim
+FROM python:3.13-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Install runtime dependencies and FFmpeg
 RUN apt-get update && apt-get install -y \
