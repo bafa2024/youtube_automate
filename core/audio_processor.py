@@ -228,6 +228,27 @@ class AudioProcessor:
             logger.error(f"Error adding fade effects: {e}")
             raise
     
+    def generate_timestamps(self, duration: float, count: int) -> List[float]:
+        """Generate evenly spaced timestamps for images based on audio duration"""
+        logger.info(f"Generating {count} timestamps for {duration}s duration")
+        
+        if count <= 0:
+            return []
+        
+        if count == 1:
+            return [duration / 2]  # Single image at middle
+        
+        # Generate evenly spaced timestamps
+        interval = duration / count
+        timestamps = []
+        
+        for i in range(count):
+            timestamp = (i + 0.5) * interval  # Center of each segment
+            timestamps.append(round(timestamp, 2))
+        
+        logger.info(f"Generated timestamps: {timestamps}")
+        return timestamps
+    
     def convert_audio_format(self, audio_path: str, output_path: str, format: str = 'mp3') -> str:
         """Convert audio to different format using FFmpeg"""
         logger.info(f"Converting audio format: {audio_path} to {format}")
