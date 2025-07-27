@@ -10,6 +10,7 @@ httpx==0.28.1
 
 # Validation and Settings
 pydantic==2.10.4
+pydantic-settings==2.0.3
 python-dotenv==1.0.1
 
 # Utilities
