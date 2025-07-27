@@ -217,4 +217,7 @@ debug_*.py
 *.tmp
 *.temp
 *.bak
-*.backup 
+*.backup
+
+# FFmpeg binaries (large files)
+bin/ 
