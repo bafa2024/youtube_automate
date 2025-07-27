@@ -2,8 +2,6 @@
 // Main JavaScript file for the web interface
 
 // Global state
-let authToken = localStorage.getItem('authToken');
-let currentUser = null;
 let uploadedFiles = {
     script: null,
     voice: null,
@@ -17,7 +15,6 @@ let ws = null;
 document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
     setupEventListeners();
-    checkAuthentication();
 });
 
 function initializeApp() {
@@ -34,23 +31,53 @@ function initializeApp() {
     setupDropzone('broll-dropzone', 'broll-files', handleBrollUpload);
     setupDropzone('intro-dropzone', 'intro-files', handleIntroUpload);
     setupDropzone('broll-voice-dropzone', 'broll-voice-file', handleBrollVoiceUpload);
+    
+    // Check API key status for public app
+    checkApiKey();
 }
 
 function setupEventListeners() {
-    // Auth buttons
-    document.getElementById('login-btn').addEventListener('click', () => showModal('login-modal'));
-    document.getElementById('register-btn').addEventListener('click', () => showModal('register-modal'));
-    document.getElementById('logout-btn').addEventListener('click', logout);
-    document.getElementById('api-key-btn').addEventListener('click', () => showModal('api-key-modal'));
+    // API key button
+    document.getElementById('api-key-btn').addEventListener('click', () => {
+        showModal('api-key-modal');
+        // Check current API key status when opening modal
+        checkApiKeyInModal();
+    });
 
     // Form submissions
-    document.getElementById('login-form').addEventListener('submit', handleLogin);
-    document.getElementById('register-form').addEventListener('submit', handleRegister);
     document.getElementById('api-key-form').addEventListener('submit', handleApiKey);
 
     // Generation buttons
     document.getElementById('generate-btn').addEventListener('click', generateAIImages);
     document.getElementById('organize-btn').addEventListener('click', organizeBroll);
+}
+
+async function checkApiKeyInModal() {
+    try {
+        const response = await fetch('/api/check-api-key');
+        const modalBody = document.querySelector('#api-key-modal form');
+        
+        // Remove any existing status message
+        const existingStatus = modalBody.querySelector('.api-key-status');
+        if (existingStatus) existingStatus.remove();
+        
+        // Add status message
+        const statusDiv = document.createElement('div');
+        statusDiv.className = 'api-key-status mb-4 p-3 rounded';
+        
+        if (response.ok) {
+            const data = await response.json();
+            statusDiv.className += ' bg-green-100 text-green-800';
+            statusDiv.innerHTML = `<i class="fas fa-check-circle mr-2"></i>API key is already configured (${data.source})`;
+        } else {
+            statusDiv.className += ' bg-yellow-100 text-yellow-800';
+            statusDiv.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i>No API key configured yet';
+        }
+        
+        modalBody.insertBefore(statusDiv, modalBody.firstChild);
+    } catch (error) {
+        console.error('Error checking API key in modal:', error);
+    }
 }
 
 // Tab switching
@@ -75,123 +102,18 @@ function switchTab(tabName) {
     }
 }
 
-// Authentication
-async function checkAuthentication() {
-    if (authToken) {
-        try {
-            const response = await fetch('/api/auth/me', {
-                headers: {
-                    'Authorization': `Bearer ${authToken}`
-                }
-            });
-            
-            if (response.ok) {
-                currentUser = await response.json();
-                updateUIForAuth(true);
-                connectWebSocket();
-            } else {
-                logout();
-            }
-        } catch (error) {
-            console.error('Auth check failed:', error);
-            logout();
-        }
-    }
-}
-
-function updateUIForAuth(isAuthenticated) {
-    if (isAuthenticated) {
-        document.getElementById('auth-buttons').classList.add('hidden');
-        document.getElementById('user-menu').classList.remove('hidden');
-        document.getElementById('username').textContent = currentUser.username;
-        checkApiKey();
-    } else {
-        document.getElementById('auth-buttons').classList.remove('hidden');
-        document.getElementById('user-menu').classList.add('hidden');
-    }
-    
-    updateGenerateButtons();
-}
-
-async function handleLogin(e) {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    
-    try {
-        const response = await fetch('/api/auth/token', {
-            method: 'POST',
-            body: formData
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            authToken = data.access_token;
-            localStorage.setItem('authToken', authToken);
-            closeModal('login-modal');
-            checkAuthentication();
-            showNotification('Login successful!', 'success');
-        } else {
-            showNotification('Invalid username or password', 'error');
-        }
-    } catch (error) {
-        showNotification('Login failed: ' + error.message, 'error');
-    }
-}
-
-async function handleRegister(e) {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    
-    try {
-        const response = await fetch('/api/auth/register', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                email: formData.get('email'),
-                username: formData.get('username'),
-                password: formData.get('password')
-            })
-        });
-        
-        if (response.ok) {
-            closeModal('register-modal');
-            showNotification('Registration successful! Please login.', 'success');
-            showModal('login-modal');
-        } else {
-            const error = await response.json();
-            showNotification(error.detail || 'Registration failed', 'error');
-        }
-    } catch (error) {
-        showNotification('Registration failed: ' + error.message, 'error');
-    }
-}
-
-function logout() {
-    authToken = null;
-    currentUser = null;
-    localStorage.removeItem('authToken');
-    updateUIForAuth(false);
-    if (ws) ws.close();
-    showNotification('Logged out successfully', 'info');
-}
-
 // API Key Management
 async function checkApiKey() {
     try {
-        const response = await fetch('/api/settings/api-key', {
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            }
-        });
-        
+        const response = await fetch('/api/check-api-key');
         if (response.ok) {
-            const data = await response.json();
-            updateApiKeyStatus(data.has_api_key);
+            updateApiKeyStatus(true);
+        } else {
+            updateApiKeyStatus(false);
         }
     } catch (error) {
         console.error('Failed to check API key:', error);
+        updateApiKeyStatus(false);
     }
 }
 
@@ -211,13 +133,15 @@ function updateApiKeyStatus(hasKey) {
 async function handleApiKey(e) {
     e.preventDefault();
     const formData = new FormData(e.target);
+    const submitButton = e.target.querySelector('button[type="submit"]');
+    
+    // Disable submit button and show loading state
+    submitButton.disabled = true;
+    submitButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Saving...';
     
     try {
         const response = await fetch('/api/settings/api-key', {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            },
             body: formData
         });
         
@@ -225,11 +149,18 @@ async function handleApiKey(e) {
             closeModal('api-key-modal');
             showNotification('API key saved successfully!', 'success');
             checkApiKey();
+            // Clear the form
+            e.target.reset();
         } else {
-            showNotification('Failed to save API key', 'error');
+            const error = await response.text();
+            showNotification('Failed to save API key: ' + error, 'error');
         }
     } catch (error) {
         showNotification('Error: ' + error.message, 'error');
+    } finally {
+        // Re-enable submit button
+        submitButton.disabled = false;
+        submitButton.innerHTML = 'Save';
     }
 }
 
@@ -263,11 +194,6 @@ function setupDropzone(dropzoneId, inputId, handler) {
 }
 
 async function handleScriptUpload(files) {
-    if (!authToken) {
-        showNotification('Please login to upload files', 'error');
-        return;
-    }
-    
     const file = files[0];
     if (!file) return;
     
@@ -277,9 +203,6 @@ async function handleScriptUpload(files) {
     try {
         const response = await fetch('/api/upload/script', {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            },
             body: formData
         });
         
@@ -299,11 +222,6 @@ async function handleScriptUpload(files) {
 }
 
 async function handleVoiceUpload(files) {
-    if (!authToken) {
-        showNotification('Please login to upload files', 'error');
-        return;
-    }
-    
     const file = files[0];
     if (!file) return;
     
@@ -313,9 +231,6 @@ async function handleVoiceUpload(files) {
     try {
         const response = await fetch('/api/upload/audio', {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            },
             body: formData
         });
         
@@ -335,11 +250,6 @@ async function handleVoiceUpload(files) {
 }
 
 async function handleBrollUpload(files) {
-    if (!authToken) {
-        showNotification('Please login to upload files', 'error');
-        return;
-    }
-    
     for (const file of files) {
         const formData = new FormData();
         formData.append('file', file);
@@ -348,9 +258,6 @@ async function handleBrollUpload(files) {
         try {
             const response = await fetch('/api/upload/video', {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${authToken}`
-                },
                 body: formData
             });
             
@@ -369,11 +276,6 @@ async function handleBrollUpload(files) {
 }
 
 async function handleIntroUpload(files) {
-    if (!authToken) {
-        showNotification('Please login to upload files', 'error');
-        return;
-    }
-    
     for (const file of files) {
         const formData = new FormData();
         formData.append('file', file);
@@ -382,9 +284,6 @@ async function handleIntroUpload(files) {
         try {
             const response = await fetch('/api/upload/video', {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${authToken}`
-                },
                 body: formData
             });
             
@@ -402,11 +301,6 @@ async function handleIntroUpload(files) {
 }
 
 async function handleBrollVoiceUpload(files) {
-    if (!authToken) {
-        showNotification('Please login to upload files', 'error');
-        return;
-    }
-    
     const file = files[0];
     if (!file) return;
     
@@ -416,9 +310,6 @@ async function handleBrollVoiceUpload(files) {
     try {
         const response = await fetch('/api/upload/audio', {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            },
             body: formData
         });
         
@@ -439,13 +330,13 @@ async function handleBrollVoiceUpload(files) {
 // UI Updates
 function updateGenerateButtons() {
     const generateBtn = document.getElementById('generate-btn');
-    const canGenerate = authToken && uploadedFiles.script && uploadedFiles.voice;
+    const canGenerate = uploadedFiles.script && uploadedFiles.voice;
     generateBtn.disabled = !canGenerate;
 }
 
 function updateOrganizeButton() {
     const organizeBtn = document.getElementById('organize-btn');
-    const canOrganize = authToken && uploadedFiles.brollClips.length > 0;
+    const canOrganize = uploadedFiles.brollClips.length > 0;
     organizeBtn.disabled = !canOrganize;
 }
 
@@ -486,61 +377,77 @@ function removeClip(type, fileId) {
 
 // Job Processing
 async function generateAIImages() {
-    if (!authToken) {
-        showNotification('Please login first', 'error');
-        return;
-    }
+    // Disable button to prevent multiple clicks
+    const generateBtn = document.getElementById('generate-btn');
+    generateBtn.disabled = true;
+    generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Starting...';
     
-    const scriptText = await readScriptFile();
-    if (!scriptText) {
-        showNotification('Failed to read script file', 'error');
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('script_file_id', uploadedFiles.script.file_id);
-    formData.append('voice_file_id', uploadedFiles.voice.file_id);
-    formData.append('request', JSON.stringify({
-        script_text: scriptText,
-        image_count: parseInt(document.getElementById('image-count').value),
-        style: document.getElementById('image-style').value,
-        character_description: document.getElementById('character-desc').value,
-        voice_duration: 60, // Will be calculated server-side
-        export_options: {
+    try {
+        console.log('Starting image generation, reading script file...');
+        console.log('Script file data:', uploadedFiles.script);
+        
+        // Try to read script content, but have a fallback
+        let scriptText = await readScriptFile();
+        if (!scriptText) {
+            console.warn('Failed to read script file via API, using placeholder text');
+            // Use a placeholder or prompt user to enter text
+            scriptText = 'Generate images based on the uploaded script content.';
+        }
+        
+        console.log('Preparing generation request...');
+        const formData = new FormData();
+        formData.append('script_file_id', uploadedFiles.script.file_id);
+        formData.append('voice_file_id', uploadedFiles.voice.file_id);
+        formData.append('script_text', scriptText);
+        formData.append('image_count', document.getElementById('image-count').value);
+        formData.append('style', document.getElementById('image-style').value);
+        formData.append('character_description', document.getElementById('character-desc').value || 'High quality visuals');
+        formData.append('voice_duration', '60'); // Will be calculated server-side
+        formData.append('export_options', JSON.stringify({
             images: document.getElementById('export-images').checked,
             clips: document.getElementById('export-clips').checked,
             full_video: document.getElementById('export-full-video').checked
-        }
-    }));
-    
-    try {
+        }));
+        
+        console.log('Sending generation request...');
         const response = await fetch('/api/generate/ai-images', {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            },
             body: formData
         });
         
         if (response.ok) {
             const data = await response.json();
+            console.log('Generation started:', data);
             showNotification('AI image generation started!', 'success');
+            
+            // Show progress section
+            document.getElementById('ai-progress-section').classList.remove('hidden');
+            
+            // Start tracking the job
             trackJob(data.job_id, 'ai');
         } else {
-            const error = await response.json();
-            showNotification(error.detail || 'Failed to start generation', 'error');
+            let errorMessage = 'Failed to start generation';
+            try {
+                const error = await response.json();
+                errorMessage = error.detail || errorMessage;
+            } catch (e) {
+                errorMessage = await response.text() || errorMessage;
+            }
+            console.error('Generation error:', errorMessage);
+            showNotification(errorMessage, 'error');
         }
     } catch (error) {
+        console.error('Error in generateAIImages:', error);
         showNotification('Error: ' + error.message, 'error');
+    } finally {
+        // Re-enable button
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<i class="fas fa-magic mr-2"></i>Generate AI Images';
+        updateGenerateButtons();
     }
 }
 
 async function organizeBroll() {
-    if (!authToken) {
-        showNotification('Please login first', 'error');
-        return;
-    }
-    
     const requestData = {
         intro_clip_ids: uploadedFiles.introClips.map(c => c.file_id),
         broll_clip_ids: uploadedFiles.brollClips.map(c => c.file_id),
@@ -553,7 +460,6 @@ async function organizeBroll() {
         const response = await fetch('/api/generate/broll', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${authToken}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(requestData)
@@ -573,9 +479,32 @@ async function organizeBroll() {
 }
 
 async function readScriptFile() {
-    // In a real implementation, you would read the file content
-    // For now, return placeholder text
-    return "This is the script content that will be used for image generation.";
+    if (!uploadedFiles.script) {
+        return null;
+    }
+    
+    try {
+        // Read the script file content
+        const response = await fetch(`/api/files/${uploadedFiles.script.file_id}/content`);
+        if (response.ok) {
+            const data = await response.json();
+            const content = data.content;
+            console.log('Script content read successfully:', content.substring(0, 100) + '...');
+            return content;
+        } else {
+            console.error('Failed to read script file:', response.status, response.statusText);
+            try {
+                const errorData = await response.json();
+                console.error('Error details:', errorData);
+            } catch (e) {
+                // Ignore JSON parse errors
+            }
+            return null;
+        }
+    } catch (error) {
+        console.error('Error reading script file:', error);
+        return null;
+    }
 }
 
 function trackJob(jobId, type) {
@@ -589,11 +518,7 @@ function trackJob(jobId, type) {
     // Poll for job status
     const pollInterval = setInterval(async () => {
         try {
-            const response = await fetch(`/api/jobs/${jobId}`, {
-                headers: {
-                    'Authorization': `Bearer ${authToken}`
-                }
-            });
+            const response = await fetch(`/api/jobs/${jobId}`);
             
             if (response.ok) {
                 const job = await response.json();
@@ -605,18 +530,57 @@ function trackJob(jobId, type) {
                 if (job.status === 'completed') {
                     clearInterval(pollInterval);
                     showNotification('Job completed successfully!', 'success');
+                    
+                    // Handle different job types
+                    if (type === 'ai' && job.result) {
+                        displayGeneratedImages(job.result);
+                    }
+                    
                     if (job.result_url) {
                         showDownloadLink(job.result_url, type);
                     }
                 } else if (job.status === 'failed') {
                     clearInterval(pollInterval);
                     showNotification('Job failed: ' + job.message, 'error');
+                    console.error('Job failed:', job);
                 }
+            } else {
+                console.error('Failed to get job status:', response.status);
             }
         } catch (error) {
             console.error('Failed to poll job status:', error);
         }
     }, 2000);
+}
+
+function displayGeneratedImages(result) {
+    // Show preview section
+    const previewSection = document.getElementById('ai-preview-section');
+    const previewGrid = document.getElementById('ai-preview-grid');
+    
+    if (result && result.images && result.images.length > 0) {
+        previewSection.classList.remove('hidden');
+        
+        // Clear existing previews
+        previewGrid.innerHTML = '';
+        
+        // Add image previews
+        result.images.forEach((imagePath, index) => {
+            const imageDiv = document.createElement('div');
+            imageDiv.className = 'relative group';
+            imageDiv.innerHTML = `
+                <img src="/api/files/serve/${imagePath}" alt="Generated Image ${index + 1}" 
+                     class="w-full h-48 object-cover rounded-lg shadow-md hover:shadow-xl transition-shadow">
+                <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-opacity rounded-lg flex items-center justify-center">
+                    <a href="/api/files/serve/${imagePath}" download 
+                       class="opacity-0 group-hover:opacity-100 transition-opacity bg-white px-3 py-1 rounded text-sm">
+                        <i class="fas fa-download mr-1"></i>Download
+                    </a>
+                </div>
+            `;
+            previewGrid.appendChild(imageDiv);
+        });
+    }
 }
 
 function showDownloadLink(url, type) {
@@ -632,14 +596,8 @@ function showDownloadLink(url, type) {
 
 // Jobs Management
 async function loadJobs() {
-    if (!authToken) return;
-    
     try {
-        const response = await fetch('/api/jobs', {
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            }
-        });
+        const response = await fetch('/api/jobs');
         
         if (response.ok) {
             const jobs = await response.json();
@@ -699,10 +657,7 @@ async function cancelJob(jobId) {
     
     try {
         const response = await fetch(`/api/jobs/${jobId}`, {
-            method: 'DELETE',
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            }
+            method: 'DELETE'
         });
         
         if (response.ok) {
@@ -716,9 +671,8 @@ async function cancelJob(jobId) {
 
 // WebSocket for real-time updates
 function connectWebSocket() {
-    if (!currentUser) return;
-    
-    const wsUrl = `ws://${window.location.host}/ws/${currentUser.id}`;
+    // No authentication needed for public app
+    const wsUrl = `ws://${window.location.host}/ws/public`; // Assuming a public endpoint for WebSocket
     ws = new WebSocket(wsUrl);
     
     ws.onmessage = (event) => {

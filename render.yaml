@@ -1,14 +1,13 @@
 services:
   - type: web
-    name: yt-automation-web
+    name: ai-video-tool
     env: python
-    plan: starter
-    buildCommand: pip install -r requirements-minimal.txt
-    startCommand: uvicorn main_minimal:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install -r requirements-deploy.txt
+    startCommand: uvicorn main_simple:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.13.0
-      - key: PORT
-        value: 8000
+        value: 3.11.0
+      - key: OPENAI_API_KEY
+        sync: false
     healthCheckPath: /health
     autoDeploy: true 

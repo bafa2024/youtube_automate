@@ -1,4 +1,5 @@
 import aiosqlite
+import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -82,9 +83,31 @@ async def verify_user_password(username: str, password: str, verify_func) -> Opt
         return user
     return None
 
-# FILE CRUD
-async def create_file(user_id: int, file_id: str, filename: str, file_type: str, file_path: str, size: int, upload_time: str) -> int:
+async def update_user_password(user_id: int, new_hashed_password: str) -> bool:
+    """Update user's password"""
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET hashed_password = ? WHERE id = ?",
+            (new_hashed_password, user_id)
+        )
+        await db.commit()
+        return True
+
+async def update_user_api_key(user_id: int, encrypted_api_key: str) -> bool:
+    """Update user's encrypted API key"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET encrypted_api_key = ? WHERE id = ?",
+            (encrypted_api_key, user_id)
+        )
+        await db.commit()
+        return True
+
+# FILE CRUD
+async def create_file(user_id: int, file_id: str, filename: str, file_type: str, file_path: str, size: int, upload_time: str = None, file_metadata: Dict[str, Any] = None) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        if upload_time is None:
+            upload_time = datetime.now().isoformat()
         await db.execute(
             "INSERT INTO files (user_id, file_id, filename, file_type, file_path, size, upload_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (user_id, file_id, filename, file_type, file_path, size, upload_time)
@@ -102,11 +125,11 @@ async def get_file_by_id(file_id: str) -> Optional[Dict[str, Any]]:
             return dict(row) if row else None
 
 # JOB CRUD
-async def create_job(job_id: str, user_id: int, status: str, message: str, created_at: str, progress: int, result_path: str = None) -> int:
+async def create_job(job_id: str, user_id: int, status: str, message: str, created_at: str, progress: int, result_path: str = None, job_type: str = None) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO jobs (job_id, user_id, status, message, created_at, progress, result_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (job_id, user_id, status, message, created_at, progress, result_path)
+            "INSERT INTO jobs (job_id, user_id, status, message, created_at, progress, result_path, job_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, user_id, status, message, created_at, progress, result_path, job_type)
         )
         await db.commit()
         async with db.execute("SELECT last_insert_rowid()") as cursor:
@@ -120,8 +143,23 @@ async def get_job_by_id(job_id: str) -> Optional[Dict[str, Any]]:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-async def update_job_status(job_id: str, status: str, message: str = None, progress: int = None, result_path: str = None):
+async def update_job_status(job_id: str, status: str, message: str = None, progress: int = None, result_path: str = None, result: Dict[str, Any] = None):
     async with aiosqlite.connect(DB_PATH) as db:
-        query = "UPDATE jobs SET status = ?, message = COALESCE(?, message), progress = COALESCE(?, progress), result_path = COALESCE(?, result_path) WHERE job_id = ?"
-        await db.execute(query, (status, message, progress, result_path, job_id))
-        await db.commit() 
+        if result:
+            query = "UPDATE jobs SET status = ?, message = COALESCE(?, message), progress = COALESCE(?, progress), result_path = COALESCE(?, result_path), result = ? WHERE job_id = ?"
+            await db.execute(query, (status, message, progress, result_path, json.dumps(result), job_id))
+        else:
+            query = "UPDATE jobs SET status = ?, message = COALESCE(?, message), progress = COALESCE(?, progress), result_path = COALESCE(?, result_path) WHERE job_id = ?"
+            await db.execute(query, (status, message, progress, result_path, job_id))
+        await db.commit()
+
+async def get_user_jobs(user_id: int, skip: int = 0, limit: int = 10) -> List[Dict[str, Any]]:
+    """Get user's jobs with pagination"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (user_id, limit, skip)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows] 

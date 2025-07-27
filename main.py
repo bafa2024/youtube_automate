@@ -10,10 +10,10 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Request, Form, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Request, Form, Depends, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,13 +34,10 @@ from core.api_manager import APIKeyManager
 from core.openai_generator import OpenAIImageGenerator
 
 # Import new modules for web app
-from database import Base, JobStatus, User, FileRecord, get_db
-from auth import get_current_user, create_access_token, auth_router
-from config import settings
-from celery_app import celery_app
-import tasks
 from db_utils import init_db, create_file, get_file_by_id, create_job, get_job_by_id, update_job_status
 from db_utils import get_user_by_id
+import tasks
+from celery_app import celery_app
 
 # WebSocket for real-time job updates
 from fastapi import WebSocket, WebSocketDisconnect
@@ -50,6 +47,9 @@ from typing import Set
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+from config import Settings
+settings = Settings()
 
 # Lifespan context manager for startup/shutdown
 @asynccontextmanager
@@ -62,8 +62,18 @@ async def lifespan(app: FastAPI):
         Path(dir_path).mkdir(parents=True, exist_ok=True)
     
     # Initialize database
-    # Removed: async with engine.begin() as conn:
-    # Removed: await conn.run_sync(Base.metadata.create_all)
+    await init_db()
+    
+    # Load API key if stored
+    api_key_file = Path("api_key.txt")
+    if api_key_file.exists():
+        try:
+            stored_key = api_key_file.read_text().strip()
+            if stored_key:
+                os.environ['OPENAI_API_KEY'] = stored_key
+                logger.info("API key loaded from file")
+        except Exception as e:
+            logger.error(f"Error loading API key: {e}")
     
     yield
     
@@ -94,6 +104,7 @@ app.add_middleware(
 # Removed: async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 # Include routers
+from auth import auth_router
 app.include_router(auth_router)
 
 # Mount static files
@@ -125,6 +136,8 @@ class JobResponse(BaseModel):
     created_at: datetime
     progress: int = 0
     result_url: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+    job_type: Optional[str] = None
 
 class FileUploadResponse(BaseModel):
     file_id: str
@@ -178,9 +191,7 @@ async def save_upload_file(upload_file: UploadFile, upload_type: str = "general"
 # Removed: async def get_db_session(): ...
 
 # API Endpoints
-@app.on_event("startup")
-async def on_startup():
-    await init_db()
+# Moved to lifespan context manager
 
 @app.get("/")
 async def root():
@@ -199,7 +210,6 @@ async def health_check():
 @app.post("/api/upload/script", response_model=FileUploadResponse)
 async def upload_script(
     file: UploadFile = File(..., description="Script file (.txt or .docx)"),
-    current_user: dict = Depends(get_current_user)
 ):
     if not file.filename.endswith((".txt", ".docx")):
         raise HTTPException(400, "Only .txt and .docx files are supported")
@@ -213,7 +223,7 @@ async def upload_script(
         await f.write(content)
     upload_time = datetime.now().isoformat()
     await create_file(
-        user_id=current_user['id'],
+        user_id=None, # No user ID for public endpoints
         file_id=file_id,
         filename=file.filename,
         file_type="script",
@@ -232,41 +242,49 @@ async def upload_script(
 @app.post("/api/upload/audio", response_model=FileUploadResponse)
 async def upload_audio(
     file: UploadFile = File(..., description="Audio file (.mp3, .wav, .m4a)"),
-    current_user: User = Depends(get_current_user)
 ):
     """Upload an audio file (voiceover)"""
-    if not file.filename.endswith(('.mp3', '.wav', '.m4a')):
-        raise HTTPException(400, "Only .mp3, .wav, and .m4a files are supported")
-    
-    file_info = await save_upload_file(file, "audio")
-    
-    # Get audio duration
-    audio_processor = AudioProcessor()
     try:
-        duration = audio_processor.get_duration(file_info["saved_path"])
-        file_info["duration"] = duration
-    except Exception as e:
-        logger.error(f"Failed to get audio duration: {e}")
-        file_info["duration"] = None
-    
-    # Store in database
-    await create_file(
-        user_id=current_user.id,
-        file_id=file_info["file_id"],
-        filename=file_info["filename"],
-        file_type="audio",
-        file_path=file_info["saved_path"],
-        size=file_info["size"],
-        file_metadata={"duration": file_info.get("duration")}
-    )
-    
-    return FileUploadResponse(**file_info)
+        if not file.filename.endswith((".mp3", ".wav", ".m4a")):
+            logger.error(f"Rejected file with invalid extension: {file.filename}")
+            raise HTTPException(400, "Only .mp3, .wav, and .m4a files are supported")
+        # Read file content and check size
+        content = await file.read()
+        max_size = getattr(settings, 'MAX_UPLOAD_SIZE', 500 * 1024 * 1024)  # 500MB default
+        if len(content) > max_size:
+            logger.error(f"File too large: {len(content)} bytes (limit: {max_size} bytes)")
+            raise HTTPException(413, f"File too large. Max allowed size is {max_size // (1024*1024)} MB.")
+        # Save file
+        file_info = await save_upload_file(file, "audio")
+        audio_processor = AudioProcessor()
+        try:
+            duration = audio_processor.get_duration(file_info["saved_path"])
+            file_info["duration"] = duration
+        except Exception as e:
+            logger.error(f"Failed to get audio duration: {e}")
+            file_info["duration"] = None
+        try:
+            await create_file(
+                user_id=None, # No user ID for public endpoints
+                file_id=file_info["file_id"],
+                filename=file_info["filename"],
+                file_type="audio",
+                file_path=file_info["saved_path"],
+                size=file_info["size"],
+                file_metadata={"duration": file_info.get("duration")}
+            )
+        except Exception as db_exc:
+            logger.error(f"Database error in create_file: {db_exc}")
+            raise HTTPException(500, f"Database error: {db_exc}")
+        return FileUploadResponse(**file_info)
+    except Exception as exc:
+        logger.error(f"Voiceover upload failed: {exc}")
+        raise HTTPException(500, f"Voiceover upload failed: {exc}")
 
 @app.post("/api/upload/video", response_model=FileUploadResponse)
 async def upload_video(
     file: UploadFile = File(..., description="Video file (.mp4, .avi, .mov, .mkv)"),
     video_type: str = Form("broll", description="Type of video: 'broll' or 'intro'"),
-    current_user: User = Depends(get_current_user)
 ):
     """Upload a video file for B-roll organization"""
     if not file.filename.endswith(('.mp4', '.avi', '.mov', '.mkv')):
@@ -276,7 +294,7 @@ async def upload_video(
     
     # Store in database
     await create_file(
-        user_id=current_user.id,
+        user_id=None, # No user ID for public endpoints
         file_id=file_info["file_id"],
         filename=file_info["filename"],
         file_type=f"video_{video_type}",
@@ -288,67 +306,112 @@ async def upload_video(
 
 @app.post("/api/generate/ai-images", response_model=JobResponse)
 async def generate_ai_images(
-    request: AIImageGenerationRequest,
     background_tasks: BackgroundTasks,
     script_file_id: str = Form(...),
     voice_file_id: str = Form(...),
-    current_user: dict = Depends(get_current_user)
+    script_text: str = Form(None),  # Make optional
+    image_count: int = Form(...),
+    style: str = Form(...),
+    character_description: str = Form(...),
+    voice_duration: float = Form(...),
+    export_options: str = Form(...),
 ):
     """Start AI image generation job"""
-    # Validate API key
-    api_manager = APIKeyManager()
-    if not api_manager.get_api_key():
-        raise HTTPException(400, "OpenAI API key not configured. Please set it in settings.")
+    logger.info(f"Received image generation request: images={image_count}, style={style}")
     
-    # Get file paths from database
-    script_file = await get_file_by_id(script_file_id)
-    voice_file = await get_file_by_id(voice_file_id)
-    
-    if not script_file or not voice_file:
-        raise HTTPException(404, "Script or voice file not found")
-    
-    # Create job
-    job_id = str(uuid.uuid4())
-    created_at = datetime.now().isoformat()
-    await create_job(
-        job_id=job_id,
-        user_id=current_user['id'],
-        status="pending",
-        message="AI image generation job started",
-        created_at=created_at,
-        progress=0,
-        result_path=None
-    )
-    
-    # Queue task
-    task = tasks.generate_ai_images_task.apply_async(
-        args=[job_id, {
-            "script_path": script_file.file_path,
-            "voice_path": voice_file.file_path,
-            "script_text": request.script_text,
-            "image_count": request.image_count,
-            "style": request.style,
-            "character_description": request.character_description,
-            "voice_duration": request.voice_duration,
-            "export_options": request.export_options
-        }],
-        task_id=job_id
-    )
-    
-    return JobResponse(
-        job_id=job_id,
-        status="pending",
-        message="AI image generation job started",
-        created_at=created_at,
-        progress=0,
-        result_url=None
-    )
+    try:
+        # Validate API key
+        api_manager = APIKeyManager()
+        api_key = api_manager.get_api_key()
+        logger.info(f"API key check: {'Found' if api_key else 'Not found'}")
+        
+        if not api_key:
+            logger.error("OpenAI API key not configured.")
+            raise HTTPException(400, "OpenAI API key not configured. Please set it in settings.")
+        # Get file paths from database
+        logger.info(f"Looking up files: script={script_file_id}, voice={voice_file_id}")
+        script_file = await get_file_by_id(script_file_id)
+        voice_file = await get_file_by_id(voice_file_id)
+        
+        logger.info(f"Script file: {script_file}")
+        logger.info(f"Voice file: {voice_file}")
+        
+        if not script_file or not voice_file:
+            logger.error(f"Script or voice file not found: script_file={script_file}, voice_file={voice_file}")
+            raise HTTPException(404, "Script or voice file not found")
+        
+        # If script_text not provided, try to read from file
+        if not script_text:
+            try:
+                with open(script_file['file_path'], 'r', encoding='utf-8') as f:
+                    script_text = f.read()
+                logger.info("Successfully read script from file")
+            except Exception as e:
+                logger.error(f"Failed to read script file: {e}")
+                script_text = "Generate images based on the uploaded content."
+        # Create job
+        job_id = str(uuid.uuid4())
+        created_at = datetime.now().isoformat()
+        logger.info(f"Creating job with ID: {job_id}")
+        
+        try:
+            await create_job(
+                job_id=job_id,
+                user_id=None, # No user ID for public endpoints
+                status="pending",
+                message="AI image generation job started",
+                created_at=created_at,
+                progress=0,
+                result_path=None,
+                job_type="ai_image_generation"
+            )
+            logger.info("Job created successfully in database")
+        except Exception as db_exc:
+            logger.error(f"Database error in create_job: {db_exc}")
+            raise HTTPException(500, f"Database error: {db_exc}")
+        # Parse export options
+        try:
+            export_options_dict = json.loads(export_options)
+        except json.JSONDecodeError:
+            export_options_dict = {"images": True, "clips": True, "full_video": False}
+        
+        # Queue task
+        try:
+            task = tasks.generate_ai_images_task.apply_async(
+                args=[job_id, {
+                    "user_id": None,  # No user ID for public endpoints
+                    "params": {
+                        "script_path": script_file.file_path,
+                        "voice_path": voice_file.file_path,
+                        "script_text": script_text,
+                        "image_count": image_count,
+                        "style": style,
+                        "character_description": character_description,
+                        "voice_duration": voice_duration,
+                        "export_options": export_options_dict
+                    }
+                }],
+                task_id=job_id
+            )
+        except Exception as celery_exc:
+            logger.error(f"Celery task queue error: {celery_exc}")
+            raise HTTPException(500, f"Task queue error: {celery_exc}")
+        return JobResponse(
+            job_id=job_id,
+            status="pending",
+            message="AI image generation job started",
+            created_at=created_at,
+            progress=0,
+            result_url=None
+        )
+    except Exception as exc:
+        logger.error(f"Image generation request failed: {exc}")
+        raise HTTPException(500, f"Image generation request failed: {exc}")
 
 @app.post("/api/generate/broll", response_model=JobResponse)
 async def organize_broll(
     request: BRollOrganizationRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user)
 ):
     """Start B-roll organization job"""
     # Validate files exist
@@ -369,12 +432,13 @@ async def organize_broll(
     created_at = datetime.now().isoformat()
     await create_job(
         job_id=job_id,
-        user_id=current_user.id,
+        user_id=None, # No user ID for public endpoints
         status="pending",
         message="B-roll organization job started",
         created_at=created_at,
         progress=0,
-        result_path=None
+        result_path=None,
+        job_type="broll_organization"
     )
     
     # Queue task
@@ -393,47 +457,67 @@ async def organize_broll(
     )
 
 @app.get("/api/jobs/{job_id}", response_model=JobResponse)
-async def get_job_status_endpoint(job_id: str, current_user: dict = Depends(get_current_user)):
+async def get_job_status_endpoint(job_id: str):
     job = await get_job_by_id(job_id)
-    if not job or job['user_id'] != current_user['id']:
+    if not job:
         raise HTTPException(404, "Job not found")
+    
+    # Parse result if it exists
+    result_data = None
+    if job.get('result'):
+        try:
+            result_data = json.loads(job['result'])
+        except:
+            pass
+    
     return JobResponse(
         job_id=job['job_id'],
         status=job['status'],
         message=job['message'],
         created_at=job['created_at'],
         progress=job['progress'],
-        result_url=job['result_path']
+        result_url=job['result_path'],
+        result=result_data,
+        job_type=job.get('job_type')
     )
 
 @app.get("/api/jobs", response_model=List[JobResponse])
 async def list_jobs(
     skip: int = 0,
     limit: int = 10,
-    current_user: User = Depends(get_current_user)
 ):
     """List user's jobs"""
-    jobs = await get_user_by_id(current_user.id).get_jobs(skip, limit)
-    return [
-        JobResponse(
+    from db_utils import get_user_jobs
+    jobs = await get_user_jobs(None, skip, limit) # No user ID for public endpoints
+    job_responses = []
+    for job in jobs:
+        # Parse result if it exists
+        result_data = None
+        if job.get('result'):
+            try:
+                result_data = json.loads(job['result'])
+            except:
+                pass
+        
+        job_responses.append(JobResponse(
             job_id=job['job_id'],
             status=job['status'],
             message=job['message'],
             created_at=job['created_at'],
             progress=job['progress'],
-            result_url=job['result_path']
-        )
-        for job in jobs
-    ]
+            result_url=job['result_path'],
+            result=result_data,
+            job_type=job.get('job_type')
+        ))
+    return job_responses
 
 @app.delete("/api/jobs/{job_id}")
 async def cancel_job(
     job_id: str,
-    current_user: User = Depends(get_current_user)
 ):
     """Cancel a running job"""
     job = await get_job_by_id(job_id)
-    if not job or job['user_id'] != current_user.id:
+    if not job:
         raise HTTPException(404, "Job not found")
     
     if job['status'] not in ["pending", "processing"]:
@@ -447,15 +531,43 @@ async def cancel_job(
     
     return {"message": "Job cancelled successfully"}
 
+@app.get("/api/files/{file_id}/content")
+async def get_file_content(file_id: str):
+    """Get the content of a file"""
+    try:
+        file_record = await get_file_by_id(file_id)
+        if not file_record:
+            logger.error(f"File record not found for ID: {file_id}")
+            raise HTTPException(404, "File not found in database")
+        
+        file_path = file_record.get('file_path')
+        if not file_path:
+            logger.error(f"File path is None for file ID: {file_id}")
+            raise HTTPException(404, "File path not found")
+            
+        if not os.path.exists(file_path):
+            logger.error(f"File not found on disk: {file_path}")
+            raise HTTPException(404, f"File not found on disk: {file_path}")
+        
+        # Read file content
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            # Return as JSON response with proper content type
+            return JSONResponse(content={"content": content, "file_id": file_id})
+        
+    except Exception as e:
+        logger.error(f"Error reading file content: {e}")
+        raise HTTPException(500, f"Error reading file: {str(e)}")
+
 @app.get("/api/download/{job_id}/{filename}")
 async def download_result(
     job_id: str,
     filename: str,
-    current_user: User = Depends(get_current_user)
 ):
     """Download job result file"""
     job = await get_job_by_id(job_id)
-    if not job or job['user_id'] != current_user.id:
+    if not job:
         raise HTTPException(404, "Job not found")
     
     file_path = Path(settings.OUTPUT_DIR) / job_id / filename
@@ -469,34 +581,89 @@ async def download_result(
         filename=filename
     )
 
+@app.get("/api/files/serve/{file_path:path}")
+async def serve_file(file_path: str):
+    """Serve generated files (images, videos, etc.)"""
+    # Construct full path
+    full_path = Path(file_path)
+    
+    # Security check - ensure file is within allowed directories
+    allowed_dirs = [
+        Path(settings.OUTPUT_DIR).resolve(),
+        Path(settings.UPLOAD_DIR).resolve()
+    ]
+    
+    try:
+        resolved_path = full_path.resolve()
+        if not any(str(resolved_path).startswith(str(allowed_dir)) for allowed_dir in allowed_dirs):
+            raise HTTPException(403, "Access denied")
+    except Exception:
+        raise HTTPException(404, "File not found")
+    
+    if not full_path.exists() or not full_path.is_file():
+        raise HTTPException(404, "File not found")
+    
+    # Determine media type
+    media_type = 'application/octet-stream'
+    if full_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.gif']:
+        media_type = f'image/{full_path.suffix[1:]}'
+    elif full_path.suffix.lower() in ['.mp4', '.avi', '.mov', '.mkv']:
+        media_type = f'video/{full_path.suffix[1:]}'
+    elif full_path.suffix.lower() in ['.mp3', '.wav', '.m4a']:
+        media_type = f'audio/{full_path.suffix[1:]}'
+    
+    return FileResponse(
+        full_path,
+        media_type=media_type,
+        filename=full_path.name
+    )
+
 @app.post("/api/settings/api-key")
 async def set_api_key(
     api_key: str = Form(...),
-    current_user: User = Depends(get_current_user)
 ):
     """Set OpenAI API key for the user"""
-    # Encrypt and store API key
-    from cryptography.fernet import Fernet
-    import base64
-    
-    # Generate a key for encryption (in production, use a secure key)
-    key = base64.urlsafe_b64encode(b"your-secret-key-32-bytes-long!!")
-    cipher = Fernet(key)
-    encrypted_key = cipher.encrypt(api_key.encode())
-    
-    # Store in database
-    await get_user_by_id(current_user.id).set_api_key(encrypted_key.decode())
-    
-    return {"message": "API key set successfully"}
+    try:
+        # For simplicity in public mode, store the API key in environment
+        os.environ['OPENAI_API_KEY'] = api_key
+        
+        # Also store in a file for persistence
+        api_key_file = Path("api_key.txt")
+        api_key_file.write_text(api_key)
+        
+        # Validate the API key by testing it
+        api_manager = APIKeyManager()
+        api_manager.set_api_key(api_key)
+        
+        return {"message": "API key set successfully"}
+    except Exception as e:
+        logger.error(f"API key storage error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to set API key"
+        )
 
-@app.get("/api/settings/api-key")
-async def check_api_key(
-    current_user: User = Depends(get_current_user)
-):
-    """Check if user has API key configured"""
-    api_manager = APIKeyManager()
-    has_key = api_manager.has_api_key()
-    return {"has_api_key": has_key}
+@app.get("/api/check-api-key")
+async def check_api_key():
+    """Check if OpenAI API key is configured"""
+    # Check environment variable first
+    env_key = os.getenv('OPENAI_API_KEY')
+    if env_key:
+        return {"status": "ok", "source": "environment"}
+    
+    # Check stored file
+    api_key_file = Path("api_key.txt")
+    if api_key_file.exists():
+        try:
+            stored_key = api_key_file.read_text().strip()
+            if stored_key:
+                # Load it into environment for this session
+                os.environ['OPENAI_API_KEY'] = stored_key
+                return {"status": "ok", "source": "file"}
+        except Exception as e:
+            logger.error(f"Error reading API key file: {e}")
+    
+    raise HTTPException(404, "API key not configured")
 
 # WebSocket for real-time job updates
 from fastapi import WebSocket, WebSocketDisconnect

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Image Generation - Final</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold mb-6">Image Generation Test Suite</h1>
+        
+        <!-- Test Controls -->
+        <div class="bg-white p-6 rounded-lg shadow mb-6">
+            <h2 class="text-xl font-semibold mb-4">Test Controls</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <button onclick="runFullTest()" class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700">
+                    <i class="fas fa-play mr-2"></i>Run Full Test
+                </button>
+                <button onclick="clearLog()" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+                    <i class="fas fa-trash mr-2"></i>Clear Log
+                </button>
+            </div>
+        </div>
+        
+        <!-- Status Display -->
+        <div class="bg-white p-6 rounded-lg shadow mb-6">
+            <h2 class="text-xl font-semibold mb-4">Current Status</h2>
+            <div id="status-display" class="space-y-2">
+                <div>API Key: <span id="api-status" class="font-mono">Not checked</span></div>
+                <div>Script ID: <span id="script-id" class="font-mono">None</span></div>
+                <div>Audio ID: <span id="audio-id" class="font-mono">None</span></div>
+                <div>Job ID: <span id="job-id" class="font-mono">None</span></div>
+            </div>
+        </div>
+        
+        <!-- Generated Images -->
+        <div id="images-section" class="bg-white p-6 rounded-lg shadow mb-6 hidden">
+            <h2 class="text-xl font-semibold mb-4">Generated Images</h2>
+            <div id="images-grid" class="grid grid-cols-3 gap-4"></div>
+        </div>
+        
+        <!-- Log Output -->
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-semibold mb-4">Test Log</h2>
+            <pre id="test-log" class="bg-gray-100 p-4 rounded text-sm overflow-x-auto max-h-96 overflow-y-auto"></pre>
+        </div>
+    </div>
+    
+    <script>
+        let testData = {
+            scriptId: null,
+            audioId: null,
+            jobId: null
+        };
+        
+        function log(message, type = 'info') {
+            const logEl = document.getElementById('test-log');
+            const time = new Date().toLocaleTimeString();
+            const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
+            logEl.textContent += `[${time}] ${prefix} ${message}\n`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        function clearLog() {
+            document.getElementById('test-log').textContent = '';
+            log('Log cleared');
+        }
+        
+        function updateStatus(field, value, isSuccess = true) {
+            const el = document.getElementById(field);
+            el.textContent = value;
+            el.className = 'font-mono ' + (isSuccess ? 'text-green-600' : 'text-red-600');
+        }
+        
+        async function runFullTest() {
+            log('Starting full image generation test...', 'info');
+            
+            try {
+                // 1. Check API Key
+                log('Checking API key...');
+                const apiResponse = await fetch('/api/check-api-key');
+                if (apiResponse.ok) {
+                    updateStatus('api-status', 'Set', true);
+                    log('API key is configured', 'success');
+                } else {
+                    updateStatus('api-status', 'Not set', false);
+                    log('API key not configured. Please set it first!', 'error');
+                    return;
+                }
+                
+                // 2. Upload test script
+                log('Uploading test script...');
+                const scriptText = `Scene 1: A majestic sunrise over snow-capped mountains, with golden light painting the peaks.
+                
+Scene 2: A peaceful forest path winding through tall pine trees, with soft morning mist.
+
+Scene 3: A vibrant field of wildflowers swaying in the gentle breeze under a clear blue sky.`;
+                
+                const scriptBlob = new Blob([scriptText], { type: 'text/plain' });
+                const scriptForm = new FormData();
+                scriptForm.append('file', scriptBlob, 'test_script.txt');
+                
+                const scriptResponse = await fetch('/api/upload/script', {
+                    method: 'POST',
+                    body: scriptForm
+                });
+                
+                if (scriptResponse.ok) {
+                    const scriptData = await scriptResponse.json();
+                    testData.scriptId = scriptData.file_id;
+                    updateStatus('script-id', scriptData.file_id, true);
+                    log(`Script uploaded: ${scriptData.filename}`, 'success');
+                } else {
+                    throw new Error('Failed to upload script');
+                }
+                
+                // 3. Upload test audio
+                log('Uploading test audio...');
+                const audioData = new Uint8Array(10000);
+                const audioBlob = new Blob([audioData], { type: 'audio/mpeg' });
+                const audioForm = new FormData();
+                audioForm.append('file', audioBlob, 'test_audio.mp3');
+                
+                const audioResponse = await fetch('/api/upload/audio', {
+                    method: 'POST',
+                    body: audioForm
+                });
+                
+                if (audioResponse.ok) {
+                    const audioData = await audioResponse.json();
+                    testData.audioId = audioData.file_id;
+                    updateStatus('audio-id', audioData.file_id, true);
+                    log(`Audio uploaded: ${audioData.filename}`, 'success');
+                } else {
+                    throw new Error('Failed to upload audio');
+                }
+                
+                // 4. Start image generation
+                log('Starting image generation...');
+                const genForm = new FormData();
+                genForm.append('script_file_id', testData.scriptId);
+                genForm.append('voice_file_id', testData.audioId);
+                genForm.append('script_text', scriptText);
+                genForm.append('image_count', '3');
+                genForm.append('style', 'Photorealistic');
+                genForm.append('character_description', 'Beautiful natural landscapes with vibrant colors');
+                genForm.append('voice_duration', '60');
+                genForm.append('export_options', JSON.stringify({
+                    images: true,
+                    clips: false,
+                    full_video: false
+                }));
+                
+                const genResponse = await fetch('/api/generate/ai-images', {
+                    method: 'POST',
+                    body: genForm
+                });
+                
+                if (genResponse.ok) {
+                    const genData = await genResponse.json();
+                    testData.jobId = genData.job_id;
+                    updateStatus('job-id', genData.job_id, true);
+                    log(`Generation job started: ${genData.job_id}`, 'success');
+                    
+                    // Start monitoring
+                    monitorJob();
+                } else {
+                    const error = await genResponse.text();
+                    throw new Error(`Failed to start generation: ${error}`);
+                }
+                
+            } catch (error) {
+                log(`Test failed: ${error.message}`, 'error');
+            }
+        }
+        
+        async function monitorJob() {
+            if (!testData.jobId) return;
+            
+            let attempts = 0;
+            const maxAttempts = 60; // 2 minutes maximum
+            
+            const interval = setInterval(async () => {
+                attempts++;
+                
+                try {
+                    const response = await fetch(`/api/jobs/${testData.jobId}`);
+                    if (response.ok) {
+                        const job = await response.json();
+                        log(`Job progress: ${job.progress}% - ${job.status} - ${job.message}`);
+                        
+                        if (job.status === 'completed') {
+                            clearInterval(interval);
+                            log('Job completed successfully!', 'success');
+                            
+                            // Display generated images
+                            if (job.result && job.result.images) {
+                                displayImages(job.result.images);
+                            }
+                            
+                            // Log full result
+                            log('Full result: ' + JSON.stringify(job.result, null, 2));
+                        } else if (job.status === 'failed') {
+                            clearInterval(interval);
+                            log(`Job failed: ${job.message}`, 'error');
+                        } else if (attempts >= maxAttempts) {
+                            clearInterval(interval);
+                            log('Job monitoring timeout', 'error');
+                        }
+                    } else {
+                        log(`Failed to get job status: ${response.status}`, 'error');
+                    }
+                } catch (error) {
+                    log(`Error monitoring job: ${error.message}`, 'error');
+                }
+            }, 2000);
+        }
+        
+        function displayImages(imagePaths) {
+            const section = document.getElementById('images-section');
+            const grid = document.getElementById('images-grid');
+            
+            section.classList.remove('hidden');
+            grid.innerHTML = '';
+            
+            imagePaths.forEach((path, index) => {
+                const img = document.createElement('img');
+                img.src = `/api/files/serve/${path}`;
+                img.alt = `Generated Image ${index + 1}`;
+                img.className = 'w-full h-48 object-cover rounded shadow';
+                img.onerror = () => {
+                    log(`Failed to load image: ${path}`, 'error');
+                };
+                grid.appendChild(img);
+            });
+            
+            log(`Displayed ${imagePaths.length} images`, 'success');
+        }
+        
+        // Initial log
+        log('Test suite loaded and ready');
+    </script>
+</body>
+</html>

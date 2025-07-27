@@ -21,7 +21,7 @@ from core.api_manager import APIKeyManager
 from core.openai_generator import OpenAIImageGenerator
 
 # Import database and WebSocket manager
-from database import JobStatus, GeneratedImage, FileRecord
+from db_utils import create_job, get_job_by_id, update_job_status, get_file_by_id
 # Removed: from sqlalchemy.orm import Session
 # Removed: from sqlalchemy import create_engine
 from config import settings
@@ -63,13 +63,17 @@ class CallbackTask(Task):
         if not self.job_id:
             return
         
-        # Removed: with Session(engine) as db:
-        # Removed: job = db.query(JobStatus).filter(JobStatus.job_id == self.job_id).first()
-        # Removed: if job:
-        # Removed: job.progress = progress
-        # Removed: if message:
-        # Removed: job.message = message
-        # Removed: db.commit()
+        # Update job status in database
+        try:
+            asyncio.run(update_job_status(
+                job_id=self.job_id,
+                status="processing",
+                message=message,
+                progress=progress
+            ))
+        except Exception as e:
+            # Log error but don't fail the task
+            print(f"Failed to update job status in database: {e}")
         
         # Publish update to Redis for WebSocket
         update_data = {
@@ -89,11 +93,15 @@ def generate_ai_images_task(self, job_id: str, job_data: Dict[str, Any]):
     
     try:
         # Update job status to processing
-        # Removed: with Session(engine) as db:
-        # Removed: job = db.query(JobStatus).filter(JobStatus.job_id == job_id).first()
-        # Removed: job.status = "processing"
-        # Removed: job.started_at = datetime.utcnow()
-        # Removed: db.commit()
+        try:
+            asyncio.run(update_job_status(
+                job_id=job_id,
+                status="processing",
+                message="Initializing AI image generation...",
+                progress=5
+            ))
+        except Exception as e:
+            print(f"Failed to update initial job status: {e}")
         
         self.update_progress(5, "Initializing AI image generation...")
         
@@ -222,18 +230,36 @@ def generate_ai_images_task(self, job_id: str, job_data: Dict[str, Any]):
         # Update job as completed
         self.update_progress(100, "AI image generation completed!")
         
-        # Removed: with Session(engine) as db:
-        # Removed: job = db.query(JobStatus).filter(JobStatus.job_id == job_id).first()
-        # Removed: job.status = "completed"
-        # Removed: job.completed_at = datetime.utcnow()
-        # Removed: job.result_path = str(output_dir)
-        # Removed: job.result_metadata = results
-        # Removed: db.commit()
+        # Prepare result with image paths
+        result_data = {
+            "images": [img['path'] for img in generated_images],
+            "output_dir": str(output_dir),
+            "metadata_path": str(metadata_path)
+        }
+        
+        if 'clips' in results:
+            result_data['clips'] = results['clips']
+        if 'video' in results:
+            result_data['video'] = results['video']
+        
+        # Update job status to completed
+        try:
+            asyncio.run(update_job_status(
+                job_id=job_id,
+                status="completed",
+                message="AI image generation completed successfully",
+                progress=100,
+                result_path=str(output_dir),
+                result=result_data
+            ))
+        except Exception as e:
+            print(f"Failed to update job completion status: {e}")
         
         return {
             "status": "success",
             "job_id": job_id,
-            "results": results
+            "results": results,
+            "result_data": result_data
         }
         
     except Exception as e:
@@ -259,12 +285,16 @@ def organize_broll_task(self, job_id: str, job_data: Dict[str, Any]):
     self.user_id = job_data['user_id']
     
     try:
-        # Update job status
-        # Removed: with Session(engine) as db:
-        # Removed: job = db.query(JobStatus).filter(JobStatus.job_id == job_id).first()
-        # Removed: job.status = "processing"
-        # Removed: job.started_at = datetime.utcnow()
-        # Removed: db.commit()
+        # Update job status to processing
+        try:
+            asyncio.run(update_job_status(
+                job_id=job_id,
+                status="processing",
+                message="Starting B-roll reorganization...",
+                progress=5
+            ))
+        except Exception as e:
+            print(f"Failed to update initial job status: {e}")
         
         self.update_progress(5, "Starting B-roll reorganization...")
         
@@ -348,13 +378,17 @@ def organize_broll_task(self, job_id: str, job_data: Dict[str, Any]):
         # Update job as completed
         self.update_progress(100, "B-roll reorganization completed!")
         
-        # Removed: with Session(engine) as db:
-        # Removed: job = db.query(JobStatus).filter(JobStatus.job_id == job_id).first()
-        # Removed: job.status = "completed"
-        # Removed: job.completed_at = datetime.utcnow()
-        # Removed: job.result_path = str(results.get('video_with_audio', results['video']))
-        # Removed: job.result_metadata = results
-        # Removed: db.commit()
+        # Update job status to completed
+        try:
+            asyncio.run(update_job_status(
+                job_id=job_id,
+                status="completed",
+                message="B-roll reorganization completed successfully",
+                progress=100,
+                result_path=str(results.get('video_with_audio', results['video']))
+            ))
+        except Exception as e:
+            print(f"Failed to update job completion status: {e}")
         
         return {
             "status": "success",
@@ -367,13 +401,16 @@ def organize_broll_task(self, job_id: str, job_data: Dict[str, Any]):
         import traceback
         error_traceback = traceback.format_exc()
         
-        # Removed: with Session(engine) as db:
-        # Removed: job = db.query(JobStatus).filter(JobStatus.job_id == job_id).first()
-        # Removed: job.status = "failed"
-        # Removed: job.completed_at = datetime.utcnow()
-        # Removed: job.error_message = str(e)
-        # Removed: job.error_traceback = error_traceback
-        # Removed: db.commit()
+        # Update job status to failed
+        try:
+            asyncio.run(update_job_status(
+                job_id=job_id,
+                status="failed",
+                message=f"Job failed: {str(e)}",
+                progress=0
+            ))
+        except Exception as db_error:
+            print(f"Failed to update job failure status: {db_error}")
         
         self.update_progress(0, f"Error: {str(e)}")
         raise

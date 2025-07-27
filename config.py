@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
+    # Encryption key for API keys (32 bytes base64 encoded)
+    ENCRYPTION_KEY: str = "your-32-byte-encryption-key-here!!"
+    
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./ai_video_tool.db"
     # For production, use PostgreSQL:
