@@ -335,8 +335,10 @@ def organize_broll_task(self, job_id: str, job_data: Dict[str, Any]):
             except Exception as e:
                 raise Exception(f"Failed to get voiceover file {params['voiceover_id']}: {e}")
         
-        # Create output directory
-        output_dir = Path(settings.OUTPUT_DIR) / job_id
+        # Create output directory in results folder
+        results_dir = Path("results")
+        results_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = results_dir / f"broll_job_{job_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize processors
@@ -397,13 +399,31 @@ def organize_broll_task(self, job_id: str, job_data: Dict[str, Any]):
         
         # Update job status to completed
         try:
+            final_video_path = results.get('video_with_audio', results['video'])
             asyncio.run(update_job_status(
                 job_id=job_id,
                 status="completed",
                 message="B-roll reorganization completed successfully",
                 progress=100,
-                result_path=str(results.get('video_with_audio', results['video']))
+                result_path=str(final_video_path)
             ))
+            
+            # Also create a symlink or copy to results folder for easy access
+            final_filename = Path(final_video_path).name
+            results_link = results_dir / f"latest_broll_{final_filename}"
+            try:
+                if results_link.exists():
+                    results_link.unlink()
+                results_link.symlink_to(Path(final_video_path).absolute())
+            except Exception as link_error:
+                print(f"Could not create symlink: {link_error}")
+                # Fallback: copy the file
+                try:
+                    import shutil
+                    shutil.copy2(final_video_path, results_link)
+                except Exception as copy_error:
+                    print(f"Could not copy file: {copy_error}")
+                    
         except Exception as e:
             print(f"Failed to update job completion status: {e}")
         

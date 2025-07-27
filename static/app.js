@@ -46,8 +46,6 @@ function initializeApp() {
     // Check API key status for public app
     checkApiKey();
     
-    // Enable the organize button for testing
-    updateOrganizeButton();
 }
 
 function setupEventListeners() {
@@ -364,8 +362,7 @@ function updateGenerateButtons() {
 
 function updateOrganizeButton() {
     const organizeBtn = document.getElementById('organize-btn');
-    // Temporarily enable button for testing - normally would check: uploadedFiles.brollClips.length > 0
-    const canOrganize = true; // uploadedFiles.brollClips.length > 0;
+    const canOrganize = uploadedFiles.brollClips.length > 0;
     organizeBtn.disabled = !canOrganize;
 }
 
@@ -479,11 +476,10 @@ async function generateAIImages() {
 async function organizeBroll() {
     console.log('🎬 organizeBroll function called');
     
-    // Check if we have B-roll clips (for testing, allow empty)
+    // Check if we have B-roll clips
     if (uploadedFiles.brollClips.length === 0) {
-        console.log('⚠️ No B-roll clips uploaded, but continuing for testing...');
-        // showNotification('Please upload at least one B-roll clip first', 'error');
-        // return;
+        showNotification('Please upload at least one B-roll clip first', 'error');
+        return;
     }
     
     // Show starting popup modal

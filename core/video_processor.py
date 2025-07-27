@@ -41,17 +41,19 @@ class VideoProcessor:
             file_list_path = output_dir / "clips_list.txt"
             with open(file_list_path, 'w', encoding='utf-8') as f:
                 for clip_path in clip_paths:
-                    if os.path.exists(clip_path):
-                        f.write(f"file '{clip_path}'\n")
+                    # Convert to absolute path to avoid relative path issues
+                    abs_clip_path = os.path.abspath(clip_path)
+                    if os.path.exists(abs_clip_path):
+                        f.write(f"file '{abs_clip_path}'\n")
                     else:
-                        logger.warning(f"Clip not found: {clip_path}")
+                        logger.warning(f"Clip not found: {abs_clip_path}")
             
             if progress_callback:
                 progress_callback(25)
             
             # Build FFmpeg command
             cmd = [
-                'ffmpeg',
+                './bin/ffmpeg.exe',
                 '-f', 'concat',
                 '-safe', '0',
                 '-i', str(file_list_path),
@@ -64,11 +66,12 @@ class VideoProcessor:
             if target_duration:
                 # First concatenate, then trim to target duration
                 temp_output = output_dir / "temp_concatenated.mp4"
-                cmd[6] = str(temp_output)  # Change output to temp file
+                temp_cmd = cmd.copy()
+                temp_cmd[6] = str(temp_output)  # Change output to temp file
                 
                 # Run concatenation
-                logger.info(f"Running FFmpeg command: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                logger.info(f"Running FFmpeg command: {' '.join(temp_cmd)}")
+                result = subprocess.run(temp_cmd, capture_output=True, text=True)
                 
                 if result.returncode != 0:
                     logger.error(f"FFmpeg error: {result.stderr}")
@@ -79,7 +82,7 @@ class VideoProcessor:
                 
                 # Now trim to target duration
                 trim_cmd = [
-                    'ffmpeg',
+                    './bin/ffmpeg.exe',
                     '-i', str(temp_output),
                     '-t', str(target_duration),
                     '-c', 'copy',
@@ -131,7 +134,7 @@ class VideoProcessor:
             
             # Build FFmpeg command to overlay audio
             cmd = [
-                'ffmpeg',
+                './bin/ffmpeg.exe',
                 '-i', video_path,
                 '-i', audio_path,
                 '-c:v', 'copy',  # Copy video stream without re-encoding
@@ -171,7 +174,7 @@ class VideoProcessor:
             duration = image_info.get('duration', 3.0)  # Default 3 seconds per image
             
             cmd = [
-                'ffmpeg',
+                './bin/ffmpeg.exe',
                 '-loop', '1',
                 '-i', image_path,
                 '-c:v', 'libx264',
@@ -236,7 +239,7 @@ class VideoProcessor:
         
         try:
             cmd = [
-                'ffprobe',
+                './bin/ffprobe.exe',
                 '-v', 'quiet',
                 '-show_entries', 'format=duration',
                 '-of', 'json',
@@ -268,7 +271,7 @@ class VideoProcessor:
             thumbnail_path = output_dir / f"{Path(video_path).stem}_thumb.jpg"
             
             cmd = [
-                'ffmpeg',
+                './bin/ffmpeg.exe',
                 '-i', video_path,
                 '-ss', str(timestamp),
                 '-vframes', '1',

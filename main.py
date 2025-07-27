@@ -473,13 +473,19 @@ async def get_job_status_endpoint(job_id: str):
         except:
             pass
     
+    # Generate proper download URL if result_path exists
+    download_url = None
+    if job.get('result_path'):
+        # For B-roll jobs, the result_path points to the final video
+        download_url = f"/api/files/serve/{job['result_path']}"
+    
     return JobResponse(
         job_id=job['job_id'],
         status=job['status'],
         message=job['message'],
         created_at=job['created_at'],
         progress=job['progress'],
-        result_url=job['result_path'],
+        result_url=download_url,
         result=result_data,
         job_type=job.get('job_type')
     )
@@ -502,13 +508,18 @@ async def list_jobs(
             except:
                 pass
         
+        # Generate proper download URL if result_path exists
+        download_url = None
+        if job.get('result_path'):
+            download_url = f"/api/files/serve/{job['result_path']}"
+        
         job_responses.append(JobResponse(
             job_id=job['job_id'],
             status=job['status'],
             message=job['message'],
             created_at=job['created_at'],
             progress=job['progress'],
-            result_url=job['result_path'],
+            result_url=download_url,
             result=result_data,
             job_type=job.get('job_type')
         ))
