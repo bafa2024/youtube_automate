@@ -381,8 +381,8 @@ async def generate_ai_images(
                 args=[job_id, {
                     "user_id": None,  # No user ID for public endpoints
                     "params": {
-                        "script_path": script_file.file_path,
-                        "voice_path": voice_file.file_path,
+                        "script_path": script_file['file_path'],
+                        "voice_path": voice_file['file_path'],
                         "script_text": script_text,
                         "image_count": image_count,
                         "style": style,
