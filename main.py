@@ -250,7 +250,7 @@ async def upload_audio(
             raise HTTPException(400, "Only .mp3, .wav, and .m4a files are supported")
         # Read file content and check size
         content = await file.read()
-        max_size = getattr(settings, 'MAX_UPLOAD_SIZE', 500 * 1024 * 1024)  # 500MB default
+        max_size = getattr(settings, 'MAX_UPLOAD_SIZE', 5 * 1024 * 1024 * 1024)  # 5GB default
         if len(content) > max_size:
             logger.error(f"File too large: {len(content)} bytes (limit: {max_size} bytes)")
             raise HTTPException(413, f"File too large. Max allowed size is {max_size // (1024*1024)} MB.")

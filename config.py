@@ -40,14 +40,14 @@ class Settings(BaseSettings):
     TEMP_DIR: str = "temp"
     
     # File limits
-    MAX_UPLOAD_SIZE: int = 500 * 1024 * 1024  # 500MB
+    MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024 * 1024  # 5GB (for 60-minute videos)
     ALLOWED_SCRIPT_EXTENSIONS: List[str] = [".txt", ".docx"]
     ALLOWED_AUDIO_EXTENSIONS: List[str] = [".mp3", ".wav", ".m4a"]
     ALLOWED_VIDEO_EXTENSIONS: List[str] = [".mp4", ".avi", ".mov", ".mkv"]
     
     # Processing limits
     MAX_IMAGES_PER_JOB: int = 20
-    MAX_VIDEO_DURATION: int = 3600  # 1 hour in seconds
+    MAX_VIDEO_DURATION: int = 3600  # 60 minutes in seconds
     FILE_RETENTION_DAYS: int = 7
     
     # CORS
