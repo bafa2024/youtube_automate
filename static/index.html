@@ -245,20 +245,26 @@
 
                     <!-- Progress Section -->
                     <div id="broll-progress-section" class="bg-white rounded-lg shadow-md p-6 hidden">
-                        <h3 class="text-lg font-semibold mb-4">Progress</h3>
-                        <div class="relative pt-1">
-                            <div class="flex mb-2 items-center justify-between">
-                                <div>
-                                    <span class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-green-600 bg-green-200">
-                                        <span id="broll-progress-percent">0</span>%
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-green-200">
-                                <div id="broll-progress-bar" style="width:0%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-green-600 transition-all duration-500"></div>
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-semibold">🎬 B-Roll Organization Progress</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs font-semibold inline-block py-1 px-3 uppercase rounded-full text-green-600 bg-green-200">
+                                    <span id="broll-progress-percent">0</span>%
+                                </span>
                             </div>
                         </div>
-                        <div id="broll-status" class="text-sm text-gray-600"></div>
+                        <div class="relative pt-1">
+                            <div class="overflow-hidden h-3 mb-4 text-xs flex rounded-full bg-gray-200 shadow-inner">
+                                <div id="broll-progress-bar" style="width:0%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-green-600 transition-all duration-700 ease-out rounded-full relative">
+                                    <div class="absolute inset-0 bg-white bg-opacity-20 rounded-full"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="broll-status" class="text-sm text-gray-700 font-medium text-center"></div>
+                        <div class="mt-4 text-xs text-gray-500 text-center">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            Progress updates every 2 seconds
+                        </div>
                     </div>
                 </div>
             </div>
@@ -276,6 +282,25 @@
     </div>
 
     <!-- Modals -->
+    <!-- Progress Starting Modal -->
+    <div id="progress-starting-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="text-center">
+                <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-4">
+                    <i class="fas fa-spinner fa-spin text-green-600 text-2xl"></i>
+                </div>
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">Starting B-Roll Organization</h3>
+                <p class="text-sm text-gray-600 mb-4">Preparing your video clips for processing...</p>
+                <div class="relative pt-1 mb-4">
+                    <div class="overflow-hidden h-2 text-xs flex rounded bg-green-200">
+                        <div id="starting-progress-bar" style="width:0%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-green-600 transition-all duration-500"></div>
+                    </div>
+                </div>
+                <p id="starting-status" class="text-xs text-gray-500">Initializing...</p>
+            </div>
+        </div>
+    </div>
+
     <!-- API Key Modal -->
     <div id="api-key-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50">
         <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">

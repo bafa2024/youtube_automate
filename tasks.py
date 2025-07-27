@@ -302,26 +302,38 @@ def organize_broll_task(self, job_id: str, job_data: Dict[str, Any]):
         params = job_data['params']
         
         # Get file paths from database
-        # Removed: with Session(engine) as db:
         intro_paths = []
         for file_id in params['intro_clip_ids']:
-            # Removed: file_record = db.query(FileRecord).filter(FileRecord.file_id == file_id).first()
-            # Removed: if file_record:
-            intro_paths.append(file_id) # Assuming file_id is the path for now
+            try:
+                file_record = asyncio.run(get_file_by_id(file_id))
+                if file_record and file_record.get('file_path'):
+                    intro_paths.append(file_record['file_path'])
+                else:
+                    raise Exception(f"Intro file {file_id} not found")
+            except Exception as e:
+                raise Exception(f"Failed to get intro file {file_id}: {e}")
         
         broll_paths = []
         for file_id in params['broll_clip_ids']:
-            # Removed: file_record = db.query(FileRecord).filter(FileRecord.file_id == file_id).first()
-            # Removed: if file_record:
-            broll_paths.append(file_id) # Assuming file_id is the path for now
+            try:
+                file_record = asyncio.run(get_file_by_id(file_id))
+                if file_record and file_record.get('file_path'):
+                    broll_paths.append(file_record['file_path'])
+                else:
+                    raise Exception(f"B-roll file {file_id} not found")
+            except Exception as e:
+                raise Exception(f"Failed to get B-roll file {file_id}: {e}")
         
         voiceover_path = None
         if params['voiceover_id']:
-            # Removed: voice_file = db.query(FileRecord).filter(
-            # Removed: FileRecord.file_id == params['voiceover_id']
-            # Removed: ).first()
-            # Removed: if voice_file:
-            voiceover_path = params['voiceover_id'] # Assuming voiceover_id is the path for now
+            try:
+                voice_file = asyncio.run(get_file_by_id(params['voiceover_id']))
+                if voice_file and voice_file.get('file_path'):
+                    voiceover_path = voice_file['file_path']
+                else:
+                    raise Exception(f"Voiceover file {params['voiceover_id']} not found")
+            except Exception as e:
+                raise Exception(f"Failed to get voiceover file {params['voiceover_id']}: {e}")
         
         # Create output directory
         output_dir = Path(settings.OUTPUT_DIR) / job_id
@@ -335,7 +347,12 @@ def organize_broll_task(self, job_id: str, job_data: Dict[str, Any]):
         target_duration = None
         if params['sync_to_voiceover'] and voiceover_path:
             self.update_progress(10, "Analyzing voiceover duration...")
-            # Removed: target_duration = audio_proc.get_duration(voiceover_path)
+            try:
+                target_duration = audio_proc.get_duration(voiceover_path)
+                print(f"Voiceover duration: {target_duration} seconds")
+            except Exception as e:
+                print(f"Warning: Could not get voiceover duration: {e}")
+                target_duration = None
         
         # Shuffle B-roll
         self.update_progress(20, "Shuffling B-roll clips...")

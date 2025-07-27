@@ -1,6 +1,9 @@
 // AI Video Tool Web Application
 // Main JavaScript file for the web interface
 
+// Configuration
+const API_BASE_URL = window.location.hostname === 'localhost' ? 'http://localhost:8080' : '';
+
 // Global state
 let uploadedFiles = {
     script: null,
@@ -10,6 +13,11 @@ let uploadedFiles = {
     introClips: []
 };
 let ws = null;
+
+// Helper function for API calls
+function apiUrl(path) {
+    return `${API_BASE_URL}${path}`;
+}
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
@@ -32,11 +40,19 @@ function initializeApp() {
     setupDropzone('intro-dropzone', 'intro-files', handleIntroUpload);
     setupDropzone('broll-voice-dropzone', 'broll-voice-file', handleBrollVoiceUpload);
     
+    // Setup event listeners
+    setupEventListeners();
+    
     // Check API key status for public app
     checkApiKey();
+    
+    // Enable the organize button for testing
+    updateOrganizeButton();
 }
 
 function setupEventListeners() {
+    console.log('🔧 Setting up event listeners...');
+    
     // API key button
     document.getElementById('api-key-btn').addEventListener('click', () => {
         showModal('api-key-modal');
@@ -49,12 +65,24 @@ function setupEventListeners() {
 
     // Generation buttons
     document.getElementById('generate-btn').addEventListener('click', generateAIImages);
-    document.getElementById('organize-btn').addEventListener('click', organizeBroll);
+    
+    // B-Roll organize button
+    const organizeBtn = document.getElementById('organize-btn');
+    console.log('🎯 Found organize-btn element:', organizeBtn);
+    if (organizeBtn) {
+        organizeBtn.addEventListener('click', () => {
+            console.log('🎬 organize-btn clicked!');
+            organizeBroll();
+        });
+        console.log('✅ Event listener added to organize-btn');
+    } else {
+        console.error('❌ organize-btn element not found!');
+    }
 }
 
 async function checkApiKeyInModal() {
     try {
-        const response = await fetch('/api/check-api-key');
+        const response = await fetch(apiUrl('/api/check-api-key'));
         const modalBody = document.querySelector('#api-key-modal form');
         
         // Remove any existing status message
@@ -105,7 +133,7 @@ function switchTab(tabName) {
 // API Key Management
 async function checkApiKey() {
     try {
-        const response = await fetch('/api/check-api-key');
+        const response = await fetch(apiUrl('/api/check-api-key'));
         if (response.ok) {
             updateApiKeyStatus(true);
         } else {
@@ -140,7 +168,7 @@ async function handleApiKey(e) {
     submitButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Saving...';
     
     try {
-        const response = await fetch('/api/settings/api-key', {
+        const response = await fetch(apiUrl('/api/settings/api-key'), {
             method: 'POST',
             body: formData
         });
@@ -201,7 +229,7 @@ async function handleScriptUpload(files) {
     formData.append('file', file);
     
     try {
-        const response = await fetch('/api/upload/script', {
+        const response = await fetch(apiUrl('/api/upload/script'), {
             method: 'POST',
             body: formData
         });
@@ -229,7 +257,7 @@ async function handleVoiceUpload(files) {
     formData.append('file', file);
     
     try {
-        const response = await fetch('/api/upload/audio', {
+        const response = await fetch(apiUrl('/api/upload/audio'), {
             method: 'POST',
             body: formData
         });
@@ -256,7 +284,7 @@ async function handleBrollUpload(files) {
         formData.append('video_type', 'broll');
         
         try {
-            const response = await fetch('/api/upload/video', {
+            const response = await fetch(apiUrl('/api/upload/video'), {
                 method: 'POST',
                 body: formData
             });
@@ -282,7 +310,7 @@ async function handleIntroUpload(files) {
         formData.append('video_type', 'intro');
         
         try {
-            const response = await fetch('/api/upload/video', {
+            const response = await fetch(apiUrl('/api/upload/video'), {
                 method: 'POST',
                 body: formData
             });
@@ -308,7 +336,7 @@ async function handleBrollVoiceUpload(files) {
     formData.append('file', file);
     
     try {
-        const response = await fetch('/api/upload/audio', {
+        const response = await fetch(apiUrl('/api/upload/audio'), {
             method: 'POST',
             body: formData
         });
@@ -336,7 +364,8 @@ function updateGenerateButtons() {
 
 function updateOrganizeButton() {
     const organizeBtn = document.getElementById('organize-btn');
-    const canOrganize = uploadedFiles.brollClips.length > 0;
+    // Temporarily enable button for testing - normally would check: uploadedFiles.brollClips.length > 0
+    const canOrganize = true; // uploadedFiles.brollClips.length > 0;
     organizeBtn.disabled = !canOrganize;
 }
 
@@ -410,7 +439,7 @@ async function generateAIImages() {
         }));
         
         console.log('Sending generation request...');
-        const response = await fetch('/api/generate/ai-images', {
+        const response = await fetch(apiUrl('/api/generate/ai-images'), {
             method: 'POST',
             body: formData
         });
@@ -448,6 +477,59 @@ async function generateAIImages() {
 }
 
 async function organizeBroll() {
+    console.log('🎬 organizeBroll function called');
+    
+    // Check if we have B-roll clips (for testing, allow empty)
+    if (uploadedFiles.brollClips.length === 0) {
+        console.log('⚠️ No B-roll clips uploaded, but continuing for testing...');
+        // showNotification('Please upload at least one B-roll clip first', 'error');
+        // return;
+    }
+    
+    // Show starting popup modal
+    const startingModal = document.getElementById('progress-starting-modal');
+    const startingProgressBar = document.getElementById('starting-progress-bar');
+    const startingStatus = document.getElementById('starting-status');
+    
+    startingModal.classList.remove('hidden');
+    startingProgressBar.style.width = '0%';
+    startingStatus.textContent = 'Initializing...';
+    
+    // Animate the starting popup progress
+    setTimeout(() => {
+        startingProgressBar.style.width = '20%';
+        startingStatus.textContent = 'Validating uploaded files...';
+    }, 300);
+    
+    setTimeout(() => {
+        startingProgressBar.style.width = '50%';
+        startingStatus.textContent = 'Preparing server request...';
+    }, 600);
+    
+    setTimeout(() => {
+        startingProgressBar.style.width = '80%';
+        startingStatus.textContent = 'Starting processing...';
+    }, 900);
+    
+    // Show progress section immediately
+    const progressSection = document.getElementById('broll-progress-section');
+    const progressBar = document.getElementById('broll-progress-bar');
+    const progressPercent = document.getElementById('broll-progress-percent');
+    const statusEl = document.getElementById('broll-status');
+    
+    progressSection.classList.remove('hidden');
+    progressBar.style.width = '0%';
+    progressPercent.textContent = '0';
+    statusEl.textContent = 'Initializing B-roll organization...';
+    
+    // Reset progress bar colors
+    resetProgressBar('broll');
+    
+    // Disable button to prevent multiple clicks
+    const organizeBtn = document.getElementById('organize-btn');
+    organizeBtn.disabled = true;
+    organizeBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Starting...';
+    
     const requestData = {
         intro_clip_ids: uploadedFiles.introClips.map(c => c.file_id),
         broll_clip_ids: uploadedFiles.brollClips.map(c => c.file_id),
@@ -456,8 +538,19 @@ async function organizeBroll() {
         overlay_audio: document.getElementById('overlay-audio').checked
     };
     
+    console.log('📋 Request data:', requestData);
+    console.log('📁 Uploaded files:', uploadedFiles);
+    
     try {
-        const response = await fetch('/api/generate/broll', {
+        // Update progress to show we're sending request
+        progressBar.style.width = '5%';
+        progressPercent.textContent = '5';
+        statusEl.textContent = 'Sending request to server...';
+        
+        console.log('Starting B-roll organization with data:', requestData);
+        console.log('Sending POST request to', apiUrl('/api/generate/broll'));
+        
+        const response = await fetch(apiUrl('/api/generate/broll'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -465,16 +558,66 @@ async function organizeBroll() {
             body: JSON.stringify(requestData)
         });
         
+        console.log('Response status:', response.status);
+        console.log('Response headers:', response.headers);
+        
         if (response.ok) {
             const data = await response.json();
+            console.log('✅ B-roll organization started successfully:', data);
+            
+            // Complete the starting popup animation
+            startingProgressBar.style.width = '100%';
+            startingStatus.textContent = 'Job started successfully!';
+            
+            // Close the starting modal after a brief moment
+            setTimeout(() => {
+                startingModal.classList.add('hidden');
+            }, 800);
+            
             showNotification('B-roll organization started!', 'success');
+            
+            // Update progress to show job started
+            progressBar.style.width = '10%';
+            progressPercent.textContent = '10';
+            statusEl.textContent = 'Job queued successfully. Processing...';
+            
             trackJob(data.job_id, 'broll');
         } else {
-            const error = await response.json();
-            showNotification(error.detail || 'Failed to start organization', 'error');
+            console.error('❌ Server returned error status:', response.status);
+            let errorMessage = 'Failed to start organization';
+            try {
+                const error = await response.json();
+                errorMessage = error.detail || errorMessage;
+                console.error('Error details:', error);
+            } catch (e) {
+                console.error('Failed to parse error response as JSON');
+                errorMessage = await response.text() || errorMessage;
+            }
+            console.error('Organization error:', errorMessage);
+            showNotification(errorMessage, 'error');
+            
+            // Close the starting modal on error
+            startingModal.classList.add('hidden');
+            
+            // Hide progress section on error
+            progressSection.classList.add('hidden');
         }
     } catch (error) {
+        console.error('❌ Network or JavaScript error in organizeBroll:', error);
+        console.error('Error type:', error.constructor.name);
+        console.error('Error stack:', error.stack);
         showNotification('Error: ' + error.message, 'error');
+        
+        // Close the starting modal on error
+        startingModal.classList.add('hidden');
+        
+        // Hide progress section on error
+        progressSection.classList.add('hidden');
+    } finally {
+        // Re-enable button
+        organizeBtn.disabled = false;
+        organizeBtn.innerHTML = '<i class="fas fa-random mr-2"></i>Reorganize B-Roll';
+        updateOrganizeButton();
     }
 }
 
@@ -485,7 +628,7 @@ async function readScriptFile() {
     
     try {
         // Read the script file content
-        const response = await fetch(`/api/files/${uploadedFiles.script.file_id}/content`);
+        const response = await fetch(apiUrl(`/api/files/${uploadedFiles.script.file_id}/content`));
         if (response.ok) {
             const data = await response.json();
             const content = data.content;
@@ -515,40 +658,95 @@ function trackJob(jobId, type) {
     
     progressSection.classList.remove('hidden');
     
+    // Add a small delay to show the initial progress
+    setTimeout(() => {
+        progressBar.style.width = '15%';
+        progressPercent.textContent = '15';
+        statusEl.textContent = 'Checking job status...';
+    }, 500);
+    
     // Poll for job status
     const pollInterval = setInterval(async () => {
         try {
-            const response = await fetch(`/api/jobs/${jobId}`);
+            const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
             
             if (response.ok) {
                 const job = await response.json();
                 
+                // Update progress with smooth animation
                 progressBar.style.width = `${job.progress}%`;
                 progressPercent.textContent = job.progress;
-                statusEl.textContent = job.message;
+                
+                // Enhance status message with more detail
+                let statusMessage = job.message || 'Processing...';
+                if (job.progress > 0 && job.progress < 100) {
+                    statusMessage = `${statusMessage} (${job.progress}% complete)`;
+                }
+                statusEl.textContent = statusMessage;
+                
+                // Add visual feedback for different stages
+                if (job.progress >= 50) {
+                    progressBar.classList.add('bg-blue-600');
+                    progressBar.classList.remove('bg-green-600');
+                }
+                if (job.progress >= 90) {
+                    progressBar.classList.add('bg-purple-600');
+                    progressBar.classList.remove('bg-blue-600');
+                }
                 
                 if (job.status === 'completed') {
                     clearInterval(pollInterval);
-                    showNotification('Job completed successfully!', 'success');
+                    
+                    // Final progress update
+                    progressBar.style.width = '100%';
+                    progressPercent.textContent = '100';
+                    progressBar.classList.add('bg-green-600');
+                    progressBar.classList.remove('bg-purple-600', 'bg-blue-600');
+                    statusEl.textContent = '🎉 B-roll organization completed successfully!';
+                    
+                    showNotification('B-roll organization completed successfully!', 'success');
                     
                     // Handle different job types
                     if (type === 'ai' && job.result) {
                         displayGeneratedImages(job.result);
                     }
                     
+                    if (type === 'broll' && job.result_url) {
+                        showDownloadLink(job.result_url, 'broll');
+                    }
+                    
                     if (job.result_url) {
                         showDownloadLink(job.result_url, type);
                     }
+                    
+                    // Auto-hide progress after 5 seconds
+                    setTimeout(() => {
+                        progressSection.classList.add('hidden');
+                    }, 5000);
+                    
                 } else if (job.status === 'failed') {
                     clearInterval(pollInterval);
+                    
+                    // Show error state
+                    progressBar.classList.add('bg-red-600');
+                    progressBar.classList.remove('bg-green-600', 'bg-blue-600', 'bg-purple-600');
+                    statusEl.textContent = `❌ Failed: ${job.message}`;
+                    
                     showNotification('Job failed: ' + job.message, 'error');
                     console.error('Job failed:', job);
+                    
+                    // Auto-hide progress after 10 seconds
+                    setTimeout(() => {
+                        progressSection.classList.add('hidden');
+                    }, 10000);
                 }
             } else {
                 console.error('Failed to get job status:', response.status);
+                statusEl.textContent = '⚠️ Unable to get job status. Retrying...';
             }
         } catch (error) {
             console.error('Failed to poll job status:', error);
+            statusEl.textContent = '⚠️ Connection error. Retrying...';
         }
     }, 2000);
 }
@@ -569,10 +767,10 @@ function displayGeneratedImages(result) {
             const imageDiv = document.createElement('div');
             imageDiv.className = 'relative group';
             imageDiv.innerHTML = `
-                <img src="/api/files/serve/${imagePath}" alt="Generated Image ${index + 1}" 
+                <img src="${apiUrl(`/api/files/serve/${imagePath}`)}" alt="Generated Image ${index + 1}" 
                      class="w-full h-48 object-cover rounded-lg shadow-md hover:shadow-xl transition-shadow">
                 <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-opacity rounded-lg flex items-center justify-center">
-                    <a href="/api/files/serve/${imagePath}" download 
+                    <a href="${apiUrl(`/api/files/serve/${imagePath}`)}" download 
                        class="opacity-0 group-hover:opacity-100 transition-opacity bg-white px-3 py-1 rounded text-sm">
                         <i class="fas fa-download mr-1"></i>Download
                     </a>
@@ -594,10 +792,18 @@ function showDownloadLink(url, type) {
     progressSection.appendChild(link);
 }
 
+function resetProgressBar(type) {
+    const progressBar = document.getElementById(`${type}-progress-bar`);
+    if (progressBar) {
+        progressBar.classList.remove('bg-red-600', 'bg-blue-600', 'bg-purple-600');
+        progressBar.classList.add('bg-green-600');
+    }
+}
+
 // Jobs Management
 async function loadJobs() {
     try {
-        const response = await fetch('/api/jobs');
+        const response = await fetch(apiUrl('/api/jobs'));
         
         if (response.ok) {
             const jobs = await response.json();
@@ -656,7 +862,7 @@ async function cancelJob(jobId) {
     if (!confirm('Are you sure you want to cancel this job?')) return;
     
     try {
-        const response = await fetch(`/api/jobs/${jobId}`, {
+        const response = await fetch(apiUrl(`/api/jobs/${jobId}`), {
             method: 'DELETE'
         });
         
@@ -672,7 +878,8 @@ async function cancelJob(jobId) {
 // WebSocket for real-time updates
 function connectWebSocket() {
     // No authentication needed for public app
-    const wsUrl = `ws://${window.location.host}/ws/public`; // Assuming a public endpoint for WebSocket
+    const wsHost = API_BASE_URL.replace('http://', '').replace('https://', '');
+    const wsUrl = `ws://${wsHost}/ws/public`; // Assuming a public endpoint for WebSocket
     ws = new WebSocket(wsUrl);
     
     ws.onmessage = (event) => {

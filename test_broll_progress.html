@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test B-Roll Progress Popup</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-2xl font-bold mb-6">B-Roll Progress Popup Test</h1>
+        
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-4">Test Controls</h2>
+            <div class="space-y-4">
+                <button id="test-popup" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                    <i class="fas fa-play mr-2"></i>Test Progress Popup
+                </button>
+                <button id="test-organize" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+                    <i class="fas fa-random mr-2"></i>Test Organize B-Roll
+                </button>
+            </div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-lg font-semibold mb-4">Console Output</h2>
+            <pre id="output" class="bg-gray-100 p-4 rounded text-sm overflow-auto h-64"></pre>
+        </div>
+    </div>
+
+    <!-- Progress Modal -->
+    <div id="progress-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="text-center">
+                <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-blue-100 mb-4">
+                    <i class="fas fa-spinner fa-spin text-blue-600 text-2xl"></i>
+                </div>
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">Starting B-Roll Organization</h3>
+                <p class="text-sm text-gray-600 mb-4">Preparing your video clips...</p>
+                <div class="relative pt-1 mb-4">
+                    <div class="overflow-hidden h-2 text-xs flex rounded bg-blue-200">
+                        <div id="modal-progress-bar" style="width:0%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-600 transition-all duration-500"></div>
+                    </div>
+                </div>
+                <p id="modal-status" class="text-xs text-gray-500">Initializing...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const output = document.getElementById('output');
+        
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            output.textContent += `[${timestamp}] ${message}\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function showProgressModal() {
+            document.getElementById('progress-modal').classList.remove('hidden');
+            const progressBar = document.getElementById('modal-progress-bar');
+            const statusText = document.getElementById('modal-status');
+            
+            // Simulate progress
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += 10;
+                progressBar.style.width = progress + '%';
+                
+                if (progress <= 30) {
+                    statusText.textContent = 'Uploading files to server...';
+                } else if (progress <= 60) {
+                    statusText.textContent = 'Processing video clips...';
+                } else if (progress <= 90) {
+                    statusText.textContent = 'Organizing B-roll sequence...';
+                } else {
+                    statusText.textContent = 'Finalizing...';
+                }
+                
+                if (progress >= 100) {
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        document.getElementById('progress-modal').classList.add('hidden');
+                        log('Progress modal closed');
+                    }, 1000);
+                }
+            }, 200);
+        }
+        
+        // Test popup button
+        document.getElementById('test-popup').addEventListener('click', () => {
+            log('Testing progress popup...');
+            showProgressModal();
+        });
+        
+        // Test organize button with enhanced functionality
+        document.getElementById('test-organize').addEventListener('click', async () => {
+            log('Testing B-Roll organization with progress popup...');
+            
+            // Show initial popup
+            const modal = document.getElementById('progress-modal');
+            modal.classList.remove('hidden');
+            
+            // Reset progress
+            const progressBar = document.getElementById('modal-progress-bar');
+            const statusText = document.getElementById('modal-status');
+            progressBar.style.width = '0%';
+            statusText.textContent = 'Initializing B-roll organization...';
+            
+            // Simulate initial progress
+            setTimeout(() => {
+                progressBar.style.width = '10%';
+                statusText.textContent = 'Validating uploaded files...';
+            }, 500);
+            
+            setTimeout(() => {
+                progressBar.style.width = '20%';
+                statusText.textContent = 'Starting server processing...';
+            }, 1000);
+            
+            // Hide modal after 2 seconds (when real processing starts)
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                log('Initial progress popup closed, server processing started');
+            }, 2000);
+        });
+        
+        log('Test page loaded successfully');
+    </script>
+</body>
+</html>

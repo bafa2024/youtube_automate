@@ -443,7 +443,10 @@ async def organize_broll(
     
     # Queue task
     task = tasks.organize_broll_task.apply_async(
-        args=[job_id, request.dict()],
+        args=[job_id, {
+            "user_id": None,  # No user ID for public endpoints
+            "params": request.dict()
+        }],
         task_id=job_id
     )
     
@@ -550,11 +553,10 @@ async def get_file_content(file_id: str):
             raise HTTPException(404, f"File not found on disk: {file_path}")
         
         # Read file content
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            # Return as JSON response with proper content type
-            return JSONResponse(content={"content": content, "file_id": file_id})
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # Return as JSON response with proper content type
+        return JSONResponse(content={"content": content, "file_id": file_id})
         
     except Exception as e:
         logger.error(f"Error reading file content: {e}")

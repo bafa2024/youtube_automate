@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test B-Roll Button</title>
+</head>
+<body>
+    <h1>Test B-Roll Organization Button</h1>
+    <button onclick="testBrollEndpoint()">Test B-Roll Endpoint</button>
+    <pre id="output"></pre>
+
+    <script>
+        async function testBrollEndpoint() {
+            const output = document.getElementById('output');
+            output.textContent = 'Testing...\n';
+            
+            // Test data - you'll need to replace these IDs with actual uploaded file IDs
+            const testData = {
+                intro_clip_ids: [],
+                broll_clip_ids: ["test-id-1"], // Replace with actual file ID
+                voiceover_id: null,
+                sync_to_voiceover: true,
+                overlay_audio: true
+            };
+            
+            try {
+                output.textContent += 'Sending request to /api/generate/broll\n';
+                output.textContent += 'Request data: ' + JSON.stringify(testData, null, 2) + '\n\n';
+                
+                const response = await fetch('/api/generate/broll', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(testData)
+                });
+                
+                output.textContent += 'Response status: ' + response.status + '\n';
+                output.textContent += 'Response status text: ' + response.statusText + '\n\n';
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    output.textContent += 'Success! Response:\n';
+                    output.textContent += JSON.stringify(data, null, 2);
+                } else {
+                    const errorText = await response.text();
+                    output.textContent += 'Error response:\n';
+                    output.textContent += errorText;
+                }
+            } catch (error) {
+                output.textContent += '\nJavaScript Error:\n';
+                output.textContent += error.toString() + '\n';
+                output.textContent += error.stack;
+            }
+        }
+    </script>
+</body>
+</html>

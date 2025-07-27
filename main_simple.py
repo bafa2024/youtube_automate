@@ -15,11 +15,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Import core modules
 from core.openai_generator import OpenAIImageGenerator
 from core.api_manager import APIKeyManager
+from core.video_processor import VideoProcessor
+from core.audio_processor import AudioProcessor
 from db_utils import init_db, create_job, get_job_by_id, update_job_status, create_file, get_file_by_id
 from config import Settings
 
@@ -90,6 +92,13 @@ class JobResponse(BaseModel):
     result: Optional[Dict[str, Any]] = None
     job_type: Optional[str] = None
 
+class BRollOrganizationRequest(BaseModel):
+    intro_clip_ids: List[str] = Field(default=[], description="List of intro clip UUIDs")
+    broll_clip_ids: List[str] = Field(..., description="List of B-roll clip UUIDs")
+    voiceover_id: Optional[str] = Field(None, description="Voiceover file UUID")
+    sync_to_voiceover: bool = Field(True, description="Sync video to voiceover duration")
+    overlay_audio: bool = Field(True, description="Overlay voiceover on final video")
+
 async def save_upload_file(upload_file: UploadFile, subdirectory: str = "") -> dict:
     """Save uploaded file and return file info"""
     file_id = str(uuid.uuid4())
@@ -116,7 +125,8 @@ async def save_upload_file(upload_file: UploadFile, subdirectory: str = "") -> d
 # Root endpoint
 @app.get("/")
 async def root():
-    return {"message": "AI Video Tool API (Simple Mode)"}
+    """Serve the main application page"""
+    return FileResponse("static/index.html")
 
 @app.get("/health")
 async def health_check():
@@ -127,6 +137,23 @@ async def health_check():
 async def set_api_key_page():
     """Serve the API key setup page"""
     return FileResponse("set_api_key.html")
+
+@app.get("/api")
+async def api_info():
+    """API information endpoint"""
+    return {
+        "message": "AI Video Tool API (Simple Mode)",
+        "version": "1.0.0",
+        "endpoints": {
+            "main_app": "/",
+            "api_key_setup": "/set_api_key.html",
+            "health_check": "/health",
+            "upload_script": "/api/upload/script",
+            "upload_audio": "/api/upload/audio",
+            "generate_images": "/api/generate/ai-images",
+            "check_api_key": "/api/check-api-key"
+        }
+    }
 
 # API Key endpoints
 @app.post("/api/settings/api-key")
@@ -195,6 +222,30 @@ async def upload_audio(file: UploadFile = File(...)):
         file_id=file_info["file_id"],
         filename=file_info["filename"],
         file_type="audio",
+        file_path=file_info["saved_path"],
+        size=file_info["size"]
+    )
+    
+    return {"file_id": file_info["file_id"], "filename": file_info["filename"]}
+
+@app.post("/api/upload/video")
+async def upload_video(
+    file: UploadFile = File(...),
+    video_type: str = Form("broll", description="Type of video: 'broll' or 'intro'")
+):
+    """Upload a video file"""
+    if not file.filename.endswith(('.mp4', '.avi', '.mov', '.mkv')):
+        raise HTTPException(400, "Only .mp4, .avi, .mov, and .mkv files are supported")
+    
+    subdirectory = "videos" if video_type == "broll" else "intros"
+    file_info = await save_upload_file(file, subdirectory)
+    
+    # Store in database
+    await create_file(
+        user_id=None,
+        file_id=file_info["file_id"],
+        filename=file_info["filename"],
+        file_type=video_type,
         file_path=file_info["saved_path"],
         size=file_info["size"]
     )
@@ -281,6 +332,110 @@ async def generate_images_simple(job_id: str, params: dict):
         await update_job_status(job_id, "failed", str(e), 0)
         jobs_store[job_id] = {"status": "failed", "error": str(e)}
 
+# B-Roll organization function
+async def organize_broll_simple(job_id: str, params: dict):
+    """Organize B-roll clips synchronously"""
+    try:
+        # Update job status
+        await update_job_status(job_id, "processing", "Starting B-roll reorganization...", 5)
+        
+        # Initialize processors
+        video_proc = VideoProcessor()
+        audio_proc = AudioProcessor()
+        
+        # Get file paths from database
+        intro_paths = []
+        for file_id in params['intro_clip_ids']:
+            file_record = await get_file_by_id(file_id)
+            if file_record:
+                intro_paths.append(file_record['file_path'])
+        
+        broll_paths = []
+        for file_id in params['broll_clip_ids']:
+            file_record = await get_file_by_id(file_id)
+            if file_record:
+                broll_paths.append(file_record['file_path'])
+        
+        voiceover_path = None
+        if params['voiceover_id']:
+            voice_file = await get_file_by_id(params['voiceover_id'])
+            if voice_file:
+                voiceover_path = voice_file['file_path']
+        
+        # Create output directory
+        output_dir = Path(settings.OUTPUT_DIR) / job_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Get target duration if syncing with voiceover
+        target_duration = None
+        if params['sync_to_voiceover'] and voiceover_path:
+            await update_job_status(job_id, "processing", "Analyzing voiceover duration...", 10)
+            try:
+                target_duration = audio_proc.get_duration(voiceover_path)
+            except Exception as e:
+                logger.warning(f"Could not get voiceover duration: {e}")
+        
+        # Shuffle B-roll
+        await update_job_status(job_id, "processing", "Shuffling B-roll clips...", 20)
+        import random
+        shuffled_broll = broll_paths.copy()
+        random.shuffle(shuffled_broll)
+        
+        # Combine clips
+        all_clips = intro_paths + shuffled_broll
+        
+        if not all_clips:
+            raise Exception("No video clips found")
+        
+        # Create reorganized video
+        await update_job_status(job_id, "processing", "Creating reorganized video...", 30)
+        output_path = output_dir / 'broll_reorganized.mp4'
+        
+        # Progress callback for video processing
+        async def video_progress(p):
+            overall_progress = 30 + int(p * 50)  # 30-80%
+            await update_job_status(job_id, "processing", "Processing video clips...", overall_progress)
+        
+        # Process video clips
+        video_proc.concatenate_clips(
+            all_clips, 
+            str(output_path),
+            target_duration=target_duration,
+            progress_callback=lambda p: asyncio.create_task(video_progress(p))
+        )
+        
+        results = {'video': str(output_path)}
+        
+        # Overlay audio if requested
+        if params['overlay_audio'] and voiceover_path:
+            await update_job_status(job_id, "processing", "Overlaying voiceover...", 85)
+            final_path = output_dir / 'broll_with_voiceover.mp4'
+            video_proc.add_audio_to_video(
+                str(output_path), 
+                voiceover_path, 
+                str(final_path)
+            )
+            results['video_with_audio'] = str(final_path)
+        
+        # Update job as completed
+        await update_job_status(
+            job_id, "completed", 
+            "B-roll reorganization completed!", 
+            100, str(output_dir), results
+        )
+        
+        # Update in-memory store
+        jobs_store[job_id] = {
+            "status": "completed",
+            "result": results,
+            "progress": 100
+        }
+        
+    except Exception as e:
+        logger.error(f"B-roll organization failed: {e}")
+        await update_job_status(job_id, "failed", str(e), 0)
+        jobs_store[job_id] = {"status": "failed", "error": str(e)}
+
 @app.post("/api/generate/ai-images", response_model=JobResponse)
 async def generate_ai_images(
     background_tasks: BackgroundTasks,
@@ -356,6 +511,61 @@ async def generate_ai_images(
     except Exception as e:
         logger.error(f"Failed to start generation: {e}")
         raise HTTPException(500, f"Failed to start generation: {str(e)}")
+
+@app.post("/api/generate/broll", response_model=JobResponse)
+async def organize_broll(
+    request: BRollOrganizationRequest,
+    background_tasks: BackgroundTasks
+):
+    """Start B-roll organization job"""
+    logger.info(f"Received B-roll organization request: {len(request.broll_clip_ids)} clips")
+    
+    try:
+        # Validate that we have at least some video clips
+        all_video_ids = request.intro_clip_ids + request.broll_clip_ids
+        if not all_video_ids:
+            raise HTTPException(400, "No video clips provided")
+        
+        # Create job
+        job_id = str(uuid.uuid4())
+        created_at = datetime.now()
+        
+        await create_job(
+            job_id=job_id,
+            user_id=None,
+            status="pending",
+            message="B-roll organization job started",
+            created_at=created_at.isoformat(),
+            progress=0,
+            result_path=None,
+            job_type="broll_organization"
+        )
+        
+        # Start organization in background
+        params = {
+            "intro_clip_ids": request.intro_clip_ids,
+            "broll_clip_ids": request.broll_clip_ids,
+            "voiceover_id": request.voiceover_id,
+            "sync_to_voiceover": request.sync_to_voiceover,
+            "overlay_audio": request.overlay_audio
+        }
+        
+        background_tasks.add_task(organize_broll_simple, job_id, params)
+        
+        return JobResponse(
+            job_id=job_id,
+            status="pending",
+            message="B-roll organization job started",
+            created_at=created_at,
+            progress=0,
+            job_type="broll_organization"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to start B-roll organization: {e}")
+        raise HTTPException(500, f"Failed to start B-roll organization: {str(e)}")
 
 @app.get("/api/jobs/{job_id}", response_model=JobResponse)
 async def get_job_status(job_id: str):
