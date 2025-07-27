@@ -1,22 +1,27 @@
 # Core FastAPI dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
-aiofiles==23.2.0
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+aiofiles==24.1.0
 
 # HTTP & Networking
-requests==2.31.0
-httpx==0.25.2
+requests==2.32.3
+httpx==0.28.1
 
 # Validation and Settings
-pydantic==2.5.0
-python-dotenv==1.0.0
+pydantic==2.10.4
+python-dotenv==1.0.1
 
 # Utilities
-python-dateutil==2.8.2
+python-dateutil==2.9.0
 
 # AI Integration
-openai==1.12.0
+openai==1.58.1
 
 # Image Processing
-Pillow==10.4.0 
+Pillow==11.0.0
+
+# Additional dependencies for video processing
+celery==5.4.0
+redis==5.2.1
+aiosqlite==0.21.0 

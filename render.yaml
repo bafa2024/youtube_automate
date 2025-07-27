@@ -1,13 +1,18 @@
 services:
   - type: web
-    name: ai-video-tool
+    name: broll-organizer
     env: python
-    buildCommand: pip install -r requirements-deploy.txt
-    startCommand: uvicorn main_simple:app --host 0.0.0.0 --port $PORT
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements-render.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: OPENAI_API_KEY
         sync: false
-    healthCheckPath: /health
-    autoDeploy: true 
+      - key: PORT
+        value: 8080
+    healthCheckPath: /
+    autoDeploy: true
+    plan: free 
