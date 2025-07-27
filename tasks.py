@@ -90,16 +90,16 @@ class CallbackTask(Task):
             redis_client.publish(f"job_updates:{self.user_id}", json.dumps(update_data))
 
 # Synchronous task functions (no Redis required)
-async def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
+def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
     """Synchronous AI image generation task"""
     try:
         # Update job status to processing
-        await update_job_status(
+        asyncio.run(update_job_status(
             job_id=job_id,
             status="processing",
             message="Initializing AI image generation...",
             progress=5
-        )
+        ))
         
         # Extract parameters
         params = job_data['params']
@@ -115,7 +115,7 @@ async def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize processors
-        await update_job_status(job_id, "processing", "Loading API credentials...", 10)
+        asyncio.run(update_job_status(job_id, "processing", "Loading API credentials...", 10))
         api_manager = APIKeyManager()
         api_key = api_manager.get_api_key()
         
@@ -127,12 +127,12 @@ async def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
         video_proc = VideoProcessor()
         
         # Read script
-        await update_job_status(job_id, "processing", "Reading script file...", 15)
+        asyncio.run(update_job_status(job_id, "processing", "Reading script file...", 15))
         with open(script_path, 'r', encoding='utf-8') as f:
             script_text = f.read()
         
         # Get audio duration and timestamps
-        await update_job_status(job_id, "processing", "Analyzing voiceover duration...", 20)
+        asyncio.run(update_job_status(job_id, "processing", "Analyzing voiceover duration...", 20))
         duration = audio_proc.get_duration(voice_path)
         timestamps = audio_proc.generate_timestamps(duration, image_count)
         
@@ -144,7 +144,7 @@ async def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
         
         for i, (segment, timestamp) in enumerate(zip(script_segments, timestamps)):
             progress = 20 + int((i / image_count) * 60)  # 20-80% for image generation
-            await update_job_status(job_id, "processing", f"Generating image {i+1} of {image_count}...", progress)
+            asyncio.run(update_job_status(job_id, "processing", f"Generating image {i+1} of {image_count}...", progress))
             
             # Create prompt
             prompt = openai_gen.create_scene_prompt(
@@ -172,7 +172,7 @@ async def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
                 })
                 
             except Exception as e:
-                await update_job_status(job_id, "processing", f"Failed to generate image {i+1}: {str(e)}", progress)
+                asyncio.run(update_job_status(job_id, "processing", f"Failed to generate image {i+1}: {str(e)}", progress))
                 continue
         
         # Save metadata
@@ -192,12 +192,12 @@ async def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
         results = {'images': str(output_dir)}
         
         if export_options.get('clips', False):
-            await update_job_status(job_id, "processing", "Creating video clips from images...", 85)
+            asyncio.run(update_job_status(job_id, "processing", "Creating video clips from images...", 85))
             video_proc.images_to_clips(generated_images, str(output_dir))
             results['clips'] = str(output_dir)
         
         if export_options.get('full_video', False):
-            await update_job_status(job_id, "processing", "Creating full video with voiceover...", 90)
+            asyncio.run(update_job_status(job_id, "processing", "Creating full video with voiceover...", 90))
             final_video_path = output_dir / 'final_video.mp4'
             video_proc.create_full_video(
                 generated_images, 
@@ -207,7 +207,7 @@ async def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
             results['video'] = str(final_video_path)
         
         # Update job as completed
-        await update_job_status(job_id, "completed", "AI image generation completed!", 100, str(output_dir))
+        asyncio.run(update_job_status(job_id, "completed", "AI image generation completed!", 100, str(output_dir)))
         
         return {
             "status": "success",
@@ -220,19 +220,19 @@ async def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
         import traceback
         error_traceback = traceback.format_exc()
         
-        await update_job_status(job_id, "failed", f"Error: {str(e)}", 0)
+        asyncio.run(update_job_status(job_id, "failed", f"Error: {str(e)}", 0))
         raise
 
-async def run_broll_task_sync(job_id: str, job_data: Dict[str, Any]):
+def run_broll_task_sync(job_id: str, job_data: Dict[str, Any]):
     """Synchronous B-roll organization task"""
     try:
         # Update job status to processing
-        await update_job_status(
+        asyncio.run(update_job_status(
             job_id=job_id,
             status="processing",
             message="Initializing B-roll organization...",
             progress=5
-        )
+        ))
         
         # Extract parameters
         params = job_data['params']
@@ -243,19 +243,19 @@ async def run_broll_task_sync(job_id: str, job_data: Dict[str, Any]):
         overlay_audio = params.get('overlay_audio', True)
         
         # Get file paths
-        await update_job_status(job_id, "processing", "Loading video files...", 10)
+        asyncio.run(update_job_status(job_id, "processing", "Loading video files...", 10))
         
         all_clips = []
         
         # Get intro clips
         for clip_id in intro_clip_ids:
-            clip_file = await get_file_by_id(clip_id)
+            clip_file = asyncio.run(get_file_by_id(clip_id))
             if clip_file:
                 all_clips.append(clip_file['file_path'])
         
         # Get B-roll clips
         for clip_id in broll_clip_ids:
-            clip_file = await get_file_by_id(clip_id)
+            clip_file = asyncio.run(get_file_by_id(clip_id))
             if clip_file:
                 all_clips.append(clip_file['file_path'])
         
@@ -265,7 +265,7 @@ async def run_broll_task_sync(job_id: str, job_data: Dict[str, Any]):
         # Get voiceover if provided
         voiceover_path = None
         if voiceover_id:
-            voiceover_file = await get_file_by_id(voiceover_id)
+            voiceover_file = asyncio.run(get_file_by_id(voiceover_id))
             if voiceover_file:
                 voiceover_path = voiceover_file['file_path']
         
@@ -274,18 +274,18 @@ async def run_broll_task_sync(job_id: str, job_data: Dict[str, Any]):
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize video processor
-        await update_job_status(job_id, "processing", "Processing video clips...", 20)
+        asyncio.run(update_job_status(job_id, "processing", "Processing video clips...", 20))
         video_proc = VideoProcessor()
         
         # Concatenate clips
         concatenated_path = output_dir / "concatenated.mp4"
-        await update_job_status(job_id, "processing", "Concatenating video clips...", 40)
+        asyncio.run(update_job_status(job_id, "processing", "Concatenating video clips...", 40))
         video_proc.concatenate_clips(all_clips, str(concatenated_path))
         
         # Add voiceover if provided
         final_video_path = output_dir / "final_video.mp4"
         if voiceover_path and overlay_audio:
-            await update_job_status(job_id, "processing", "Adding voiceover audio...", 60)
+            asyncio.run(update_job_status(job_id, "processing", "Adding voiceover audio...", 60))
             video_proc.add_audio_to_video(str(concatenated_path), voiceover_path, str(final_video_path))
         else:
             # Just copy the concatenated video as final
@@ -308,13 +308,13 @@ async def run_broll_task_sync(job_id: str, job_data: Dict[str, Any]):
         latest_path = results_dir / "latest_broll_organized.mp4"
         shutil.copy2(str(final_video_path), str(latest_path))
         
-        await update_job_status(
+        asyncio.run(update_job_status(
             job_id, 
             "completed", 
             "B-roll organization completed successfully!", 
             100, 
             str(result_path)
-        )
+        ))
         
         return {
             "status": "success",
@@ -327,7 +327,7 @@ async def run_broll_task_sync(job_id: str, job_data: Dict[str, Any]):
         import traceback
         error_traceback = traceback.format_exc()
         
-        await update_job_status(job_id, "failed", f"Error: {str(e)}", 0)
+        asyncio.run(update_job_status(job_id, "failed", f"Error: {str(e)}", 0))
         raise
 
 @celery_app.task(bind=True, base=CallbackTask, name='tasks.generate_ai_images')
