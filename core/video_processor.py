@@ -8,6 +8,7 @@ import subprocess
 import json
 from typing import List, Optional, Callable
 from pathlib import Path
+from .ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class VideoProcessor:
             
             # Build FFmpeg command
             cmd = [
-                './bin/ffmpeg.exe',
+                get_ffmpeg_path(),
                 '-f', 'concat',
                 '-safe', '0',
                 '-i', str(file_list_path),
@@ -82,7 +83,7 @@ class VideoProcessor:
                 
                 # Now trim to target duration
                 trim_cmd = [
-                    './bin/ffmpeg.exe',
+                    get_ffmpeg_path(),
                     '-i', str(temp_output),
                     '-t', str(target_duration),
                     '-c', 'copy',
@@ -134,7 +135,7 @@ class VideoProcessor:
             
             # Build FFmpeg command to overlay audio
             cmd = [
-                './bin/ffmpeg.exe',
+                get_ffmpeg_path(),
                 '-i', video_path,
                 '-i', audio_path,
                 '-c:v', 'copy',  # Copy video stream without re-encoding
@@ -174,7 +175,7 @@ class VideoProcessor:
             duration = image_info.get('duration', 3.0)  # Default 3 seconds per image
             
             cmd = [
-                './bin/ffmpeg.exe',
+                get_ffmpeg_path(),
                 '-loop', '1',
                 '-i', image_path,
                 '-c:v', 'libx264',
@@ -239,7 +240,7 @@ class VideoProcessor:
         
         try:
             cmd = [
-                './bin/ffprobe.exe',
+                get_ffprobe_path(),
                 '-v', 'quiet',
                 '-show_entries', 'format=duration',
                 '-of', 'json',
@@ -271,7 +272,7 @@ class VideoProcessor:
             thumbnail_path = output_dir / f"{Path(video_path).stem}_thumb.jpg"
             
             cmd = [
-                './bin/ffmpeg.exe',
+                get_ffmpeg_path(),
                 '-i', video_path,
                 '-ss', str(timestamp),
                 '-vframes', '1',

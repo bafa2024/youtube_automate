@@ -7,6 +7,7 @@ import subprocess
 import json
 from typing import Optional, List
 from pathlib import Path
+from .ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class AudioProcessor:
         
         try:
             cmd = [
-                './bin/ffprobe.exe',
+                get_ffprobe_path(),
                 '-v', 'quiet',
                 '-show_entries', 'format=duration',
                 '-of', 'json',
@@ -53,7 +54,7 @@ class AudioProcessor:
             os.makedirs(output_dir, exist_ok=True)
             
             cmd = [
-                './bin/ffmpeg.exe',
+                get_ffmpeg_path(),
                 '-i', video_path,
                 '-vn',  # No video
                 '-acodec', 'pcm_s16le',  # PCM 16-bit
@@ -87,7 +88,7 @@ class AudioProcessor:
             os.makedirs(output_dir, exist_ok=True)
             
             cmd = [
-                './bin/ffmpeg.exe',
+                get_ffmpeg_path(),
                 '-i', audio_path,
                 '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',  # EBU R128 loudness normalization
                 '-ar', '44100',  # 44.1kHz sample rate
@@ -129,7 +130,7 @@ class AudioProcessor:
                         logger.warning(f"Audio file not found: {audio_path}")
             
             cmd = [
-                './bin/ffmpeg.exe',
+                get_ffmpeg_path(),
                 '-f', 'concat',
                 '-safe', '0',
                 '-i', file_list_path,
@@ -166,7 +167,7 @@ class AudioProcessor:
             os.makedirs(output_dir, exist_ok=True)
             
             cmd = [
-                './bin/ffmpeg.exe',
+                get_ffmpeg_path(),
                 '-i', audio_path,
                 '-f', 'lavfi',
                 '-i', f'anullsrc=channel_layout=stereo:sample_rate=44100',
@@ -205,7 +206,7 @@ class AudioProcessor:
             duration = self.get_duration(audio_path)
             
             cmd = [
-                './bin/ffmpeg.exe',
+                get_ffmpeg_path(),
                 '-i', audio_path,
                 '-af', f'afade=t=in:st=0:d={fade_duration},afade=t=out:st={duration-fade_duration}:d={fade_duration}',
                 '-ar', '44100',
@@ -273,7 +274,7 @@ class AudioProcessor:
                 bitrate = '192k'
             
             cmd = [
-                './bin/ffmpeg.exe',
+                get_ffmpeg_path(),
                 '-i', audio_path,
                 '-c:a', codec
             ]

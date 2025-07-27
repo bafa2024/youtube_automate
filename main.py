@@ -64,6 +64,18 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_db()
     
+    # Check FFmpeg installation
+    from core.ffmpeg_utils import check_ffmpeg_installed, check_ffprobe_installed
+    if check_ffmpeg_installed():
+        logger.info("✓ FFmpeg is installed and accessible")
+    else:
+        logger.warning("⚠ FFmpeg not found! Video processing features may not work")
+    
+    if check_ffprobe_installed():
+        logger.info("✓ FFprobe is installed and accessible")
+    else:
+        logger.warning("⚠ FFprobe not found! Audio duration detection may not work")
+    
     # Load API key if stored
     api_key_file = Path("api_key.txt")
     if api_key_file.exists():
