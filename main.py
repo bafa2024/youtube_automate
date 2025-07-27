@@ -678,6 +678,69 @@ async def check_api_key():
     
     raise HTTPException(404, "API key not configured")
 
+@app.get("/api/results")
+async def get_results():
+    """Get all generated video results"""
+    try:
+        results = []
+        results_dir = Path("results")
+        
+        if not results_dir.exists():
+            return {"results": []}
+        
+        # Get all MP4 files in results directory
+        for file_path in results_dir.rglob("*.mp4"):
+            if file_path.is_file():
+                stat = file_path.stat()
+                
+                # Determine if this is a "latest" file
+                is_latest = file_path.name.startswith("latest_")
+                
+                # Get relative path from results directory
+                relative_path = file_path.relative_to(results_dir)
+                
+                results.append({
+                    "name": file_path.name,
+                    "path": str(relative_path),
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                    "isLatest": is_latest
+                })
+        
+        # Sort by modification time (newest first)
+        results.sort(key=lambda x: x["modified"], reverse=True)
+        
+        return {"results": results}
+    except Exception as e:
+        logger.error(f"Error getting results: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get results")
+
+@app.get("/api/download/{file_path:path}")
+async def download_file(file_path: str):
+    """Download a file from the results directory"""
+    try:
+        # Construct full path
+        full_path = Path("results") / file_path
+        
+        # Security check: ensure the file is within the results directory
+        if not str(full_path.resolve()).startswith(str(Path("results").resolve())):
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        if not full_path.exists() or not full_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Return file as streaming response
+        return FileResponse(
+            path=str(full_path),
+            filename=full_path.name,
+            media_type="video/mp4"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading file {file_path}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to download file")
+
 # WebSocket for real-time job updates
 from fastapi import WebSocket, WebSocketDisconnect
 from typing import Dict, Set

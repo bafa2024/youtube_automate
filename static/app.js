@@ -700,7 +700,7 @@ function trackJob(jobId, type) {
                     progressBar.classList.remove('bg-purple-600', 'bg-blue-600');
                     statusEl.textContent = '🎉 B-roll organization completed successfully!';
                     
-                    showNotification('B-roll organization completed successfully!', 'success');
+                    showNotification('B-roll organization completed successfully! <a href="results.html" class="underline font-semibold">View Results</a>', 'success');
                     
                     // Handle different job types
                     if (type === 'ai' && job.result) {

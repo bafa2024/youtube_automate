@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B-Roll Results - Download Your Videos</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .video-card {
+            transition: transform 0.2s ease-in-out;
+        }
+        .video-card:hover {
+            transform: translateY(-2px);
+        }
+        .download-btn {
+            transition: all 0.2s ease-in-out;
+        }
+        .download-btn:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <h1 class="text-xl font-semibold text-gray-900">🎬 B-Roll Organizer</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="index.html" class="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium">
+                        ← Back to Upload
+                    </a>
+                    <button onclick="refreshResults()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        🔄 Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h2 class="text-3xl font-bold text-gray-900 mb-2">🎬 Your B-Roll Videos</h2>
+            <p class="text-gray-600">Download your generated B-roll videos and variations</p>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loading" class="text-center py-12">
+            <div class="inline-flex items-center px-4 py-2 font-semibold leading-6 text-blue-600">
+                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Loading your videos...
+            </div>
+        </div>
+
+        <!-- Results Grid -->
+        <div id="results-container" class="hidden">
+            <!-- Latest Videos Section -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold text-gray-900 mb-4">📁 Latest Generated Videos</h3>
+                <div id="latest-videos" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Videos will be populated here -->
+                </div>
+            </div>
+
+            <!-- All Results Section -->
+            <div class="mb-8">
+                <h3 class="text-xl font-semibold text-gray-900 mb-4">📂 All Generated Results</h3>
+                <div id="all-results" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- All results will be populated here -->
+                </div>
+            </div>
+
+            <!-- No Results Message -->
+            <div id="no-results" class="hidden text-center py-12">
+                <div class="max-w-md mx-auto">
+                    <div class="text-gray-400 mb-4">
+                        <svg class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-medium text-gray-900 mb-2">No videos generated yet</h3>
+                    <p class="text-gray-600 mb-4">Start by uploading your B-roll clips and generating your first video.</p>
+                    <a href="index.html" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
+                        🎬 Start Creating
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error State -->
+        <div id="error" class="hidden text-center py-12">
+            <div class="max-w-md mx-auto">
+                <div class="text-red-400 mb-4">
+                    <svg class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                </div>
+                <h3 class="text-lg font-medium text-gray-900 mb-2">Error loading results</h3>
+                <p class="text-gray-600 mb-4" id="error-message">Something went wrong while loading your videos.</p>
+                <button onclick="refreshResults()" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
+                    🔄 Try Again
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Preview Modal -->
+    <div id="video-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-lg max-w-4xl w-full max-h-full overflow-hidden">
+                <div class="flex justify-between items-center p-4 border-b">
+                    <h3 class="text-lg font-semibold text-gray-900" id="modal-title">Video Preview</h3>
+                    <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="p-4">
+                    <video id="modal-video" controls class="w-full max-h-96 object-contain">
+                        Your browser does not support the video tag.
+                    </video>
+                </div>
+                <div class="flex justify-end p-4 border-t">
+                    <button onclick="closeModal()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded-md text-sm font-medium">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE_URL = window.location.hostname === 'localhost' ? 'http://localhost:8080' : '';
+
+        // State
+        let resultsData = [];
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            loadResults();
+        });
+
+        // Load results from server
+        async function loadResults() {
+            showLoading();
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/results`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                resultsData = data.results || [];
+                
+                if (resultsData.length === 0) {
+                    showNoResults();
+                } else {
+                    displayResults();
+                }
+                
+            } catch (error) {
+                console.error('Error loading results:', error);
+                showError('Failed to load results. Please try again.');
+            }
+        }
+
+        // Display results
+        function displayResults() {
+            hideLoading();
+            hideError();
+            hideNoResults();
+            
+            const latestVideosContainer = document.getElementById('latest-videos');
+            const allResultsContainer = document.getElementById('all-results');
+            
+            // Clear containers
+            latestVideosContainer.innerHTML = '';
+            allResultsContainer.innerHTML = '';
+            
+            // Separate latest videos from all results
+            const latestVideos = resultsData.filter(video => video.isLatest);
+            const allResults = resultsData.filter(video => !video.isLatest);
+            
+            // Display latest videos
+            latestVideos.forEach(video => {
+                latestVideosContainer.appendChild(createVideoCard(video, true));
+            });
+            
+            // Display all results
+            allResults.forEach(video => {
+                allResultsContainer.appendChild(createVideoCard(video, false));
+            });
+            
+            document.getElementById('results-container').classList.remove('hidden');
+        }
+
+        // Create video card
+        function createVideoCard(video, isLatest) {
+            const card = document.createElement('div');
+            card.className = 'video-card bg-white rounded-lg shadow-md overflow-hidden border border-gray-200';
+            
+            const fileSize = formatFileSize(video.size);
+            const date = new Date(video.modified).toLocaleDateString();
+            
+            card.innerHTML = `
+                <div class="p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-lg font-semibold text-gray-900 truncate">${video.name}</h4>
+                        ${isLatest ? '<span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-1 rounded-full">Latest</span>' : ''}
+                    </div>
+                    
+                    <div class="space-y-2 mb-4">
+                        <div class="flex items-center text-sm text-gray-600">
+                            <svg class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            ${fileSize}
+                        </div>
+                        <div class="flex items-center text-sm text-gray-600">
+                            <svg class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            ${date}
+                        </div>
+                    </div>
+                    
+                    <div class="flex space-x-2">
+                        <button onclick="previewVideo('${video.path}', '${video.name}')" 
+                                class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded-md text-sm font-medium transition-colors">
+                            👁️ Preview
+                        </button>
+                        <button onclick="downloadVideo('${video.path}', '${video.name}')" 
+                                class="flex-1 download-btn bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md text-sm font-medium">
+                            ⬇️ Download
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            return card;
+        }
+
+        // Preview video
+        function previewVideo(videoPath, videoName) {
+            const modal = document.getElementById('video-modal');
+            const video = document.getElementById('modal-video');
+            const title = document.getElementById('modal-title');
+            
+            title.textContent = videoName;
+            video.src = `${API_BASE_URL}/api/download/${encodeURIComponent(videoPath)}`;
+            modal.classList.remove('hidden');
+        }
+
+        // Close modal
+        function closeModal() {
+            const modal = document.getElementById('video-modal');
+            const video = document.getElementById('modal-video');
+            
+            video.pause();
+            video.src = '';
+            modal.classList.add('hidden');
+        }
+
+        // Download video
+        function downloadVideo(videoPath, videoName) {
+            const link = document.createElement('a');
+            link.href = `${API_BASE_URL}/api/download/${encodeURIComponent(videoPath)}`;
+            link.download = videoName;
+            link.target = '_blank';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // Refresh results
+        function refreshResults() {
+            loadResults();
+        }
+
+        // Utility functions
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function showLoading() {
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('results-container').classList.add('hidden');
+            document.getElementById('error').classList.add('hidden');
+            document.getElementById('no-results').classList.add('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.add('hidden');
+        }
+
+        function showError(message) {
+            document.getElementById('error-message').textContent = message;
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('results-container').classList.add('hidden');
+            document.getElementById('error').classList.remove('hidden');
+            document.getElementById('no-results').classList.add('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('error').classList.add('hidden');
+        }
+
+        function showNoResults() {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('results-container').classList.add('hidden');
+            document.getElementById('error').classList.add('hidden');
+            document.getElementById('no-results').classList.remove('hidden');
+        }
+
+        function hideNoResults() {
+            document.getElementById('no-results').classList.add('hidden');
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('video-modal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html> 
