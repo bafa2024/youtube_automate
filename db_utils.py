@@ -40,6 +40,8 @@ async def init_db():
             created_at TEXT,
             progress INTEGER,
             result_path TEXT,
+            job_type TEXT,
+            result TEXT,
             FOREIGN KEY(user_id) REFERENCES users(id)
         )""")
         await db.commit()
