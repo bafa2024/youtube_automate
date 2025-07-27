@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost/ai_video_tool"
     
     # Redis (for Celery and caching)
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     
     # File storage
     BASE_DIR: Path = Path(__file__).resolve().parent

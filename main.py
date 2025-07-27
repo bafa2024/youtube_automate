@@ -375,10 +375,13 @@ async def generate_ai_images(
         except json.JSONDecodeError:
             export_options_dict = {"images": True, "clips": True, "full_video": False}
         
-        # Queue task
+        # Start task in background
         try:
-            task = tasks.generate_ai_images_task.apply_async(
-                args=[job_id, {
+            # For now, run the task synchronously since Redis might not be available
+            background_tasks.add_task(
+                tasks.run_ai_images_task_sync,
+                job_id,
+                {
                     "user_id": None,  # No user ID for public endpoints
                     "params": {
                         "script_path": script_file['file_path'],
@@ -390,12 +393,11 @@ async def generate_ai_images(
                         "voice_duration": voice_duration,
                         "export_options": export_options_dict
                     }
-                }],
-                task_id=job_id
+                }
             )
-        except Exception as celery_exc:
-            logger.error(f"Celery task queue error: {celery_exc}")
-            raise HTTPException(500, f"Task queue error: {celery_exc}")
+        except Exception as task_exc:
+            logger.error(f"Task start error: {task_exc}")
+            raise HTTPException(500, f"Task start error: {task_exc}")
         return JobResponse(
             job_id=job_id,
             status="pending",
@@ -441,13 +443,14 @@ async def organize_broll(
         job_type="broll_organization"
     )
     
-    # Queue task
-    task = tasks.organize_broll_task.apply_async(
-        args=[job_id, {
+    # Start task in background
+    background_tasks.add_task(
+        tasks.run_broll_task_sync,
+        job_id,
+        {
             "user_id": None,  # No user ID for public endpoints
             "params": request.dict()
-        }],
-        task_id=job_id
+        }
     )
     
     return JobResponse(

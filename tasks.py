@@ -49,7 +49,10 @@ celery_app.conf.update(
 # Removed: engine = create_engine(settings.DATABASE_URL.replace("sqlite+aiosqlite", "sqlite"))
 
 # Redis client for pub/sub
-redis_client = redis.from_url(settings.REDIS_URL)
+try:
+    redis_client = redis.from_url(settings.REDIS_URL)
+except:
+    redis_client = None
 
 class CallbackTask(Task):
     """Base task with callbacks for progress updates"""
@@ -76,14 +79,256 @@ class CallbackTask(Task):
             print(f"Failed to update job status in database: {e}")
         
         # Publish update to Redis for WebSocket
-        update_data = {
-            "job_id": self.job_id,
-            "user_id": self.user_id,
-            "progress": progress,
-            "message": message,
-            "timestamp": datetime.utcnow().isoformat()
+        if redis_client:
+            update_data = {
+                "job_id": self.job_id,
+                "user_id": self.user_id,
+                "progress": progress,
+                "message": message,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            redis_client.publish(f"job_updates:{self.user_id}", json.dumps(update_data))
+
+# Synchronous task functions (no Redis required)
+async def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
+    """Synchronous AI image generation task"""
+    try:
+        # Update job status to processing
+        await update_job_status(
+            job_id=job_id,
+            status="processing",
+            message="Initializing AI image generation...",
+            progress=5
+        )
+        
+        # Extract parameters
+        params = job_data['params']
+        script_path = params['script_path']
+        voice_path = params['voice_path']
+        image_count = params['image_count']
+        style = params['style']
+        character_desc = params['character_description']
+        export_options = params['export_options']
+        
+        # Create output directory
+        output_dir = Path(settings.OUTPUT_DIR) / job_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize processors
+        await update_job_status(job_id, "processing", "Loading API credentials...", 10)
+        api_manager = APIKeyManager()
+        api_key = api_manager.get_api_key()
+        
+        if not api_key:
+            raise Exception("OpenAI API key not configured")
+        
+        openai_gen = OpenAIImageGenerator(api_key)
+        audio_proc = AudioProcessor()
+        video_proc = VideoProcessor()
+        
+        # Read script
+        await update_job_status(job_id, "processing", "Reading script file...", 15)
+        with open(script_path, 'r', encoding='utf-8') as f:
+            script_text = f.read()
+        
+        # Get audio duration and timestamps
+        await update_job_status(job_id, "processing", "Analyzing voiceover duration...", 20)
+        duration = audio_proc.get_duration(voice_path)
+        timestamps = audio_proc.generate_timestamps(duration, image_count)
+        
+        # Split script into segments
+        script_segments = split_script(script_text, image_count)
+        
+        # Generate images
+        generated_images = []
+        
+        for i, (segment, timestamp) in enumerate(zip(script_segments, timestamps)):
+            progress = 20 + int((i / image_count) * 60)  # 20-80% for image generation
+            await update_job_status(job_id, "processing", f"Generating image {i+1} of {image_count}...", progress)
+            
+            # Create prompt
+            prompt = openai_gen.create_scene_prompt(
+                segment, 
+                character_desc, 
+                style,
+                scene_number=i+1
+            )
+            
+            # Generate image
+            start_time = time.time()
+            try:
+                image_path = openai_gen.generate_and_save_image(
+                    prompt, 
+                    str(output_dir),
+                    f"scene_{i+1:03d}",
+                    style
+                )
+                generation_time = time.time() - start_time
+                
+                generated_images.append({
+                    'path': image_path,
+                    'timestamp': timestamp,
+                    'duration': timestamps[i+1] - timestamp if i < len(timestamps)-1 else duration - timestamp
+                })
+                
+            except Exception as e:
+                await update_job_status(job_id, "processing", f"Failed to generate image {i+1}: {str(e)}", progress)
+                continue
+        
+        # Save metadata
+        metadata_path = output_dir / 'generation_metadata.json'
+        with open(metadata_path, 'w') as f:
+            json.dump({
+                'images': generated_images,
+                'script_path': script_path,
+                'voice_path': voice_path,
+                'total_duration': duration,
+                'character_description': character_desc,
+                'style': style,
+                'job_id': job_id
+            }, f, indent=2)
+        
+        # Export based on options
+        results = {'images': str(output_dir)}
+        
+        if export_options.get('clips', False):
+            await update_job_status(job_id, "processing", "Creating video clips from images...", 85)
+            video_proc.images_to_clips(generated_images, str(output_dir))
+            results['clips'] = str(output_dir)
+        
+        if export_options.get('full_video', False):
+            await update_job_status(job_id, "processing", "Creating full video with voiceover...", 90)
+            final_video_path = output_dir / 'final_video.mp4'
+            video_proc.create_full_video(
+                generated_images, 
+                voice_path, 
+                str(final_video_path)
+            )
+            results['video'] = str(final_video_path)
+        
+        # Update job as completed
+        await update_job_status(job_id, "completed", "AI image generation completed!", 100, str(output_dir))
+        
+        return {
+            "status": "success",
+            "job_id": job_id,
+            "results": results
         }
-        redis_client.publish(f"job_updates:{self.user_id}", json.dumps(update_data))
+        
+    except Exception as e:
+        # Handle errors
+        import traceback
+        error_traceback = traceback.format_exc()
+        
+        await update_job_status(job_id, "failed", f"Error: {str(e)}", 0)
+        raise
+
+async def run_broll_task_sync(job_id: str, job_data: Dict[str, Any]):
+    """Synchronous B-roll organization task"""
+    try:
+        # Update job status to processing
+        await update_job_status(
+            job_id=job_id,
+            status="processing",
+            message="Initializing B-roll organization...",
+            progress=5
+        )
+        
+        # Extract parameters
+        params = job_data['params']
+        intro_clip_ids = params.get('intro_clip_ids', [])
+        broll_clip_ids = params.get('broll_clip_ids', [])
+        voiceover_id = params.get('voiceover_id')
+        sync_to_voiceover = params.get('sync_to_voiceover', True)
+        overlay_audio = params.get('overlay_audio', True)
+        
+        # Get file paths
+        await update_job_status(job_id, "processing", "Loading video files...", 10)
+        
+        all_clips = []
+        
+        # Get intro clips
+        for clip_id in intro_clip_ids:
+            clip_file = await get_file_by_id(clip_id)
+            if clip_file:
+                all_clips.append(clip_file['file_path'])
+        
+        # Get B-roll clips
+        for clip_id in broll_clip_ids:
+            clip_file = await get_file_by_id(clip_id)
+            if clip_file:
+                all_clips.append(clip_file['file_path'])
+        
+        if not all_clips:
+            raise Exception("No valid video clips found")
+        
+        # Get voiceover if provided
+        voiceover_path = None
+        if voiceover_id:
+            voiceover_file = await get_file_by_id(voiceover_id)
+            if voiceover_file:
+                voiceover_path = voiceover_file['file_path']
+        
+        # Create output directory
+        output_dir = Path(settings.OUTPUT_DIR) / job_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize video processor
+        await update_job_status(job_id, "processing", "Processing video clips...", 20)
+        video_proc = VideoProcessor()
+        
+        # Concatenate clips
+        concatenated_path = output_dir / "concatenated.mp4"
+        await update_job_status(job_id, "processing", "Concatenating video clips...", 40)
+        video_proc.concatenate_clips(all_clips, str(concatenated_path))
+        
+        # Add voiceover if provided
+        final_video_path = output_dir / "final_video.mp4"
+        if voiceover_path and overlay_audio:
+            await update_job_status(job_id, "processing", "Adding voiceover audio...", 60)
+            video_proc.add_audio_to_video(str(concatenated_path), voiceover_path, str(final_video_path))
+        else:
+            # Just copy the concatenated video as final
+            import shutil
+            shutil.copy2(str(concatenated_path), str(final_video_path))
+        
+        # Create results directory and copy final video
+        results_dir = Path("results")
+        results_dir.mkdir(exist_ok=True)
+        
+        # Create a symlink or copy to results directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_filename = f"broll_organized_{timestamp}.mp4"
+        result_path = results_dir / result_filename
+        
+        import shutil
+        shutil.copy2(str(final_video_path), str(result_path))
+        
+        # Also create a "latest" version
+        latest_path = results_dir / "latest_broll_organized.mp4"
+        shutil.copy2(str(final_video_path), str(latest_path))
+        
+        await update_job_status(
+            job_id, 
+            "completed", 
+            "B-roll organization completed successfully!", 
+            100, 
+            str(result_path)
+        )
+        
+        return {
+            "status": "success",
+            "job_id": job_id,
+            "result_path": str(result_path)
+        }
+        
+    except Exception as e:
+        # Handle errors
+        import traceback
+        error_traceback = traceback.format_exc()
+        
+        await update_job_status(job_id, "failed", f"Error: {str(e)}", 0)
+        raise
 
 @celery_app.task(bind=True, base=CallbackTask, name='tasks.generate_ai_images')
 def generate_ai_images_task(self, job_id: str, job_data: Dict[str, Any]):
