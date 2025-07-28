@@ -842,6 +842,8 @@ function trackJob(jobId, type) {
                     
                     // Handle different job types
                     if (type === 'ai' && job.result) {
+                        console.log('Job completed with result:', job.result);
+                        console.log('Job ID:', jobId);
                         displayGeneratedImages(job.result, jobId);
                     }
                     
@@ -1311,6 +1313,10 @@ window.nextImage = nextImage;
 
 // Video Creation Functions
 async function createVideoFromImages() {
+    console.log('=== CREATE VIDEO DEBUG ===');
+    console.log('Current image data:', currentImageData);
+    console.log('Job ID:', currentImageData.jobId);
+    
     if (!currentImageData.jobId) {
         showNotification('No images available for video creation', 'error');
         return;
@@ -1337,6 +1343,9 @@ async function createVideoFromImages() {
             create_full_video: createFullVideo
         };
         
+        console.log('Request data:', requestData);
+        console.log('API URL:', apiUrl('/api/generate/video'));
+        
         const response = await fetch(apiUrl('/api/generate/video'), {
             method: 'POST',
             headers: {
@@ -1345,8 +1354,12 @@ async function createVideoFromImages() {
             body: JSON.stringify(requestData)
         });
         
+        console.log('Response status:', response.status);
+        console.log('Response headers:', response.headers);
+        
         if (response.ok) {
             const data = await response.json();
+            console.log('Success response:', data);
             showNotification('Video creation started!', 'success');
             
             // Show video progress section
@@ -1358,11 +1371,24 @@ async function createVideoFromImages() {
             // Track video creation job
             trackVideoJob(data.job_id);
         } else {
-            const error = await response.json();
-            showNotification(error.detail || 'Failed to start video creation', 'error');
+            const errorText = await response.text();
+            console.error('Error response text:', errorText);
+            
+            let errorMessage = 'Failed to start video creation';
+            try {
+                const error = JSON.parse(errorText);
+                console.error('Error response JSON:', error);
+                errorMessage = error.detail || error.error || errorMessage;
+            } catch (e) {
+                console.error('Failed to parse error response:', e);
+                errorMessage = errorText || errorMessage;
+            }
+            
+            showNotification(errorMessage, 'error');
         }
     } catch (error) {
         console.error('Error creating video:', error);
+        console.error('Error stack:', error.stack);
         showNotification('Error: ' + error.message, 'error');
     } finally {
         createVideoBtn.disabled = false;

@@ -8,6 +8,7 @@ import asyncio
 import uuid
 import json
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
@@ -620,65 +621,105 @@ async def create_video_from_images(
     background_tasks: BackgroundTasks,
 ):
     """Create video from previously generated AI images"""
-    # Get the original job to retrieve image data
-    original_job = await get_job_by_id(request.original_job_id)
-    if not original_job:
-        raise HTTPException(404, "Original job not found")
-    
-    if original_job['status'] != 'completed':
-        raise HTTPException(400, "Original job must be completed before creating video")
-    
-    # Parse result to get image paths
-    if not original_job.get('result'):
-        raise HTTPException(400, "No images found in original job")
-    
     try:
-        result_data = json.loads(original_job['result'])
-    except:
-        raise HTTPException(400, "Invalid job result data")
-    
-    # Create new job for video creation
-    job_id = str(uuid.uuid4())
-    created_at = datetime.now().isoformat()
-    await create_job(
-        job_id=job_id,
-        user_id=None,
-        status="pending",
-        message="Video creation job started",
-        created_at=created_at,
-        job_type="video_creation",
-        params=json.dumps({
-            "original_job_id": request.original_job_id,
-            "create_clips": request.create_clips,
-            "create_full_video": request.create_full_video
-        })
-    )
-    
-    # Run task synchronously in background
-    from tasks import run_video_creation_task_sync
-    
-    threading.Thread(
-        target=run_video_creation_task_sync,
-        args=(job_id, {
-            "job_type": "video_creation",
-            "user_id": None,
-            "params": {
-                "original_job_id": request.original_job_id,
-                "original_result": result_data,
-                "create_clips": request.create_clips,
-                "create_full_video": request.create_full_video
+        # Log the request
+        logger.info(f"Video creation request received for job: {request.original_job_id}")
+        
+        # Get the original job to retrieve image data
+        original_job = await get_job_by_id(request.original_job_id)
+        if not original_job:
+            logger.error(f"Original job not found: {request.original_job_id}")
+            raise HTTPException(404, "Original job not found")
+        
+        logger.info(f"Original job status: {original_job.get('status')}")
+        logger.info(f"Original job keys: {list(original_job.keys())}")
+        
+        if original_job['status'] != 'completed':
+            raise HTTPException(400, "Original job must be completed before creating video")
+        
+        # Parse result to get image paths
+        if not original_job.get('result'):
+            logger.error(f"No result field in job: {original_job}")
+            raise HTTPException(400, "No images found in original job")
+        
+        try:
+            result_data = json.loads(original_job['result'])
+            logger.info(f"Successfully parsed result data with keys: {list(result_data.keys())}")
+        except Exception as e:
+            logger.error(f"Failed to parse job result: {e}, result: {original_job.get('result')}")
+            raise HTTPException(400, "Invalid job result data")
+        
+        # Create new job for video creation
+        job_id = str(uuid.uuid4())
+        created_at = datetime.now().isoformat()
+        await create_job(
+            job_id=job_id,
+            user_id=None,
+            status="pending",
+            message="Video creation job started",
+            created_at=created_at,
+            progress=0,
+            job_type="video_creation"
+        )
+        
+        # Run task synchronously in background
+        import tasks
+        
+        background_tasks.add_task(
+            tasks.run_video_creation_task_sync,
+            job_id,
+            {
+                "job_type": "video_creation",
+                "user_id": None,
+                "params": {
+                    "original_job_id": request.original_job_id,
+                    "original_result": result_data,
+                    "create_clips": request.create_clips,
+                    "create_full_video": request.create_full_video
+                }
             }
-        })
-    ).start()
+        )
+        
+        return JobResponse(
+            job_id=job_id,
+            status="pending",
+            message="Video creation job started",
+            created_at=created_at,
+            progress=0,
+            result_url=None
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in create_video_from_images: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, f"Failed to start video creation: {str(e)}")
+
+@app.get("/api/debug/job/{job_id}")
+async def debug_job(job_id: str):
+    """Debug endpoint to check job data"""
+    job = await get_job_by_id(job_id)
+    if not job:
+        return {"error": "Job not found"}
     
-    return JobResponse(
-        job_id=job_id,
-        status="pending",
-        message="Video creation job started",
-        created_at=created_at,
-        progress=0,
-        result_url=None
-    )
+    # Try to parse result if it exists
+    result_parsed = None
+    if job.get('result'):
+        try:
+            result_parsed = json.loads(job['result'])
+        except:
+            result_parsed = "Failed to parse"
+    
+    return {
+        "job_id": job.get('job_id'),
+        "status": job.get('status'),
+        "result_exists": bool(job.get('result')),
+        "result_length": len(job.get('result', '')) if job.get('result') else 0,
+        "result_type": type(job.get('result')).__name__,
+        "result_parsed": result_parsed,
+        "all_keys": list(job.keys())
+    }
 
 @app.post("/api/generate/broll", response_model=JobResponse)
 async def organize_broll(
