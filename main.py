@@ -33,6 +33,7 @@ from core.video_processor import VideoProcessor
 from core.audio_processor import AudioProcessor
 from core.api_manager import APIKeyManager
 from core.openai_generator import OpenAIImageGenerator
+from core.document_processor import DocumentProcessor
 
 # Import new modules for web app
 from db_utils import init_db, create_file, get_file_by_id, create_job, get_job_by_id, update_job_status
@@ -323,10 +324,10 @@ async def test_upload(
 
 @app.post("/api/upload/script", response_model=FileUploadResponse)
 async def upload_script(
-    file: UploadFile = File(..., description="Script file (.txt or .docx)"),
+    file: UploadFile = File(..., description="Script file (any text format: .txt, .docx, .pdf, .rtf, .odt, .html, .md, etc.)"),
 ):
-    if not file.filename.endswith((".txt", ".docx")):
-        raise HTTPException(400, "Only .txt and .docx files are supported")
+    # Accept any file type - we'll attempt to extract text from it
+    logger.info(f"Uploading script file: {file.filename}")
     
     # Save file using streaming approach
     file_info = await save_upload_file(file, "scripts")
@@ -545,14 +546,18 @@ async def generate_ai_images(
             logger.error(f"Script or voice file not found: script_file={script_file}, voice_file={voice_file}")
             raise HTTPException(404, "Script or voice file not found")
         
-        # If script_text not provided, try to read from file
+        # If script_text not provided, try to extract from file
         if not script_text:
             try:
-                with open(script_file['file_path'], 'r', encoding='utf-8') as f:
-                    script_text = f.read()
-                logger.info("Successfully read script from file")
+                doc_processor = DocumentProcessor()
+                script_text = doc_processor.extract_text(script_file['file_path'])
+                logger.info(f"Successfully extracted text from script file using DocumentProcessor")
+                
+                if not script_text or script_text.strip() == "":
+                    logger.warning("Extracted text is empty")
+                    script_text = "Generate images based on the uploaded content."
             except Exception as e:
-                logger.error(f"Failed to read script file: {e}")
+                logger.error(f"Failed to extract text from script file: {e}")
                 script_text = "Generate images based on the uploaded content."
         # Create job
         job_id = str(uuid.uuid4())

@@ -19,6 +19,7 @@ from core.video_processor import VideoProcessor
 from core.audio_processor import AudioProcessor
 from core.api_manager import APIKeyManager
 from core.openai_generator import OpenAIImageGenerator
+from core.document_processor import DocumentProcessor
 
 # Import database and WebSocket manager
 from db_utils import create_job, get_job_by_id, update_job_status, get_file_by_id
@@ -127,10 +128,16 @@ def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
         audio_proc = AudioProcessor()
         video_proc = VideoProcessor()
         
-        # Read script
+        # Read script using DocumentProcessor
         update_job_status_sync(job_id, "processing", "Reading script file...", 15)
-        with open(script_path, 'r', encoding='utf-8') as f:
-            script_text = f.read()
+        doc_processor = DocumentProcessor()
+        try:
+            script_text = doc_processor.extract_text(script_path)
+            if not script_text or script_text.strip() == "":
+                script_text = params.get('script_text', 'Generate images based on the uploaded content.')
+        except Exception as e:
+            logger.error(f"Failed to extract text from script: {e}")
+            script_text = params.get('script_text', 'Generate images based on the uploaded content.')
         
         # Get audio duration and timestamps
         update_job_status_sync(job_id, "processing", "Analyzing voiceover duration...", 20)
@@ -487,10 +494,16 @@ def generate_ai_images_task(self, job_id: str, job_data: Dict[str, Any]):
         audio_proc = AudioProcessor()
         video_proc = VideoProcessor()
         
-        # Read script
+        # Read script using DocumentProcessor
         self.update_progress(15, "Reading script file...")
-        with open(script_path, 'r', encoding='utf-8') as f:
-            script_text = f.read()
+        doc_processor = DocumentProcessor()
+        try:
+            script_text = doc_processor.extract_text(script_path)
+            if not script_text or script_text.strip() == "":
+                script_text = params.get('script_text', 'Generate images based on the uploaded content.')
+        except Exception as e:
+            logger.error(f"Failed to extract text from script: {e}")
+            script_text = params.get('script_text', 'Generate images based on the uploaded content.')
         
         # Get audio duration and timestamps
         self.update_progress(20, "Analyzing voiceover duration...")
