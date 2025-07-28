@@ -185,17 +185,19 @@ async def save_upload_file(upload_file: UploadFile, upload_type: str = "general"
     # Create type-specific directory
     file_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Save file
+    # Save file by streaming in chunks to avoid memory issues
+    total_size = 0
     async with aiofiles.open(file_path, 'wb') as f:
-        content = await upload_file.read()
-        await f.write(content)
+        while chunk := await upload_file.read(8192):  # Read in 8KB chunks
+            await f.write(chunk)
+            total_size += len(chunk)
     
     return {
         "file_id": file_id,
         "filename": upload_file.filename,
         "saved_path": str(file_path),
         "file_type": upload_type,
-        "size": len(content),
+        "size": total_size,
         "upload_time": datetime.now()
     }
 
@@ -225,29 +227,25 @@ async def upload_script(
 ):
     if not file.filename.endswith((".txt", ".docx")):
         raise HTTPException(400, "Only .txt and .docx files are supported")
-    file_id = str(uuid.uuid4())
-    file_extension = Path(file.filename).suffix
-    saved_filename = f"{file_id}{file_extension}"
-    file_path = Path(settings.UPLOAD_DIR) / "scripts" / saved_filename
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    content = await file.read()
-    async with aiofiles.open(file_path, 'wb') as f:
-        await f.write(content)
+    
+    # Save file using streaming approach
+    file_info = await save_upload_file(file, "scripts")
+    
     upload_time = datetime.now().isoformat()
     await create_file(
         user_id=None, # No user ID for public endpoints
-        file_id=file_id,
-        filename=file.filename,
+        file_id=file_info["file_id"],
+        filename=file_info["filename"],
         file_type="script",
-        file_path=str(file_path),
-        size=len(content),
+        file_path=file_info["saved_path"],
+        size=file_info["size"],
         upload_time=upload_time
     )
     return FileUploadResponse(
-        file_id=file_id,
-        filename=file.filename,
+        file_id=file_info["file_id"],
+        filename=file_info["filename"],
         file_type="script",
-        size=len(content),
+        size=file_info["size"],
         upload_time=upload_time
     )
 
@@ -260,14 +258,28 @@ async def upload_audio(
         if not file.filename.endswith((".mp3", ".wav", ".m4a")):
             logger.error(f"Rejected file with invalid extension: {file.filename}")
             raise HTTPException(400, "Only .mp3, .wav, and .m4a files are supported")
-        # Read file content and check size
-        content = await file.read()
-        max_size = getattr(settings, 'MAX_VOICEOVER_SIZE', 500 * 1024 * 1024)  # 500MB for voiceover files
-        if len(content) > max_size:
-            logger.error(f"Voiceover file too large: {len(content)} bytes (limit: {max_size} bytes)")
-            raise HTTPException(413, f"Voiceover file too large. Max allowed size is {max_size // (1024*1024)} MB.")
-        # Save file
+        
+        # Check file size before processing (if available)
+        if hasattr(file, 'size') and file.size:
+            max_size = getattr(settings, 'MAX_VOICEOVER_SIZE', 500 * 1024 * 1024)  # 500MB for voiceover files
+            if file.size > max_size:
+                logger.error(f"Voiceover file too large: {file.size} bytes (limit: {max_size} bytes)")
+                raise HTTPException(413, f"Voiceover file too large. Max allowed size is {max_size // (1024*1024)} MB.")
+        
+        # Save file using streaming approach
         file_info = await save_upload_file(file, "audio")
+        
+        # Check size after saving (in case size wasn't available before)
+        max_size = getattr(settings, 'MAX_VOICEOVER_SIZE', 500 * 1024 * 1024)  # 500MB for voiceover files
+        if file_info["size"] > max_size:
+            logger.error(f"Voiceover file too large: {file_info['size']} bytes (limit: {max_size} bytes)")
+            # Clean up the saved file
+            try:
+                os.remove(file_info["saved_path"])
+            except:
+                pass
+            raise HTTPException(413, f"Voiceover file too large. Max allowed size is {max_size // (1024*1024)} MB.")
+        
         audio_processor = AudioProcessor()
         try:
             duration = audio_processor.get_duration(file_info["saved_path"])
@@ -277,6 +289,11 @@ async def upload_audio(
             max_duration = getattr(settings, 'MAX_VOICEOVER_DURATION', 3600)  # 60 minutes
             if duration and duration > max_duration:
                 logger.error(f"Voiceover duration too long: {duration} seconds (limit: {max_duration} seconds)")
+                # Clean up the saved file
+                try:
+                    os.remove(file_info["saved_path"])
+                except:
+                    pass
                 raise HTTPException(413, f"Voiceover duration too long. Max allowed duration is {max_duration // 60} minutes.")
                 
         except Exception as e:
@@ -306,22 +323,67 @@ async def upload_video(
     video_type: str = Form("broll", description="Type of video: 'broll' or 'intro'"),
 ):
     """Upload a video file for B-roll organization"""
-    if not file.filename.endswith(('.mp4', '.avi', '.mov', '.mkv')):
-        raise HTTPException(400, "Unsupported video format")
-    
-    file_info = await save_upload_file(file, f"videos/{video_type}")
-    
-    # Store in database
-    await create_file(
-        user_id=None, # No user ID for public endpoints
-        file_id=file_info["file_id"],
-        filename=file_info["filename"],
-        file_type=f"video_{video_type}",
-        file_path=file_info["saved_path"],
-        size=file_info["size"]
-    )
-    
-    return FileUploadResponse(**file_info)
+    try:
+        if not file.filename.endswith(('.mp4', '.avi', '.mov', '.mkv')):
+            raise HTTPException(400, "Unsupported video format")
+        
+        # Check file size before processing (if available)
+        if hasattr(file, 'size') and file.size:
+            max_size = getattr(settings, 'MAX_VIDEO_SIZE', 2 * 1024 * 1024 * 1024)  # 2GB for video files
+            if file.size > max_size:
+                logger.error(f"Video file too large: {file.size} bytes (limit: {max_size} bytes)")
+                raise HTTPException(413, f"Video file too large. Max allowed size is {max_size // (1024*1024*1024)} GB.")
+        
+        # Save file using streaming approach
+        file_info = await save_upload_file(file, f"videos/{video_type}")
+        
+        # Check size after saving (in case size wasn't available before)
+        max_size = getattr(settings, 'MAX_VIDEO_SIZE', 2 * 1024 * 1024 * 1024)  # 2GB for video files
+        if file_info["size"] > max_size:
+            logger.error(f"Video file too large: {file_info['size']} bytes (limit: {max_size} bytes)")
+            # Clean up the saved file
+            try:
+                os.remove(file_info["saved_path"])
+            except:
+                pass
+            raise HTTPException(413, f"Video file too large. Max allowed size is {max_size // (1024*1024*1024)} GB.")
+        
+        # Check video duration
+        video_processor = VideoProcessor()
+        try:
+            duration = video_processor.get_duration(file_info["saved_path"])
+            file_info["duration"] = duration
+            
+            # Check duration limit for video files
+            max_duration = getattr(settings, 'MAX_VIDEO_DURATION', 3600)  # 60 minutes
+            if duration and duration > max_duration:
+                logger.error(f"Video duration too long: {duration} seconds (limit: {max_duration} seconds)")
+                # Clean up the saved file
+                try:
+                    os.remove(file_info["saved_path"])
+                except:
+                    pass
+                raise HTTPException(413, f"Video duration too long. Max allowed duration is {max_duration // 60} minutes.")
+                
+        except Exception as e:
+            logger.error(f"Failed to get video duration: {e}")
+            file_info["duration"] = None
+        
+        # Store in database
+        await create_file(
+            user_id=None, # No user ID for public endpoints
+            file_id=file_info["file_id"],
+            filename=file_info["filename"],
+            file_type=f"video_{video_type}",
+            file_path=file_info["saved_path"],
+            size=file_info["size"],
+            file_metadata={"duration": file_info.get("duration")}
+        )
+        
+        return FileUploadResponse(**file_info)
+    except Exception as exc:
+        logger.error(f"Video upload failed: {exc}")
+        raise HTTPException(500, f"Video upload failed: {exc}")
 
 @app.post("/api/generate/ai-images", response_model=JobResponse)
 async def generate_ai_images(

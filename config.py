@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # File limits
     MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024 * 1024  # 5GB (for 60-minute videos)
     MAX_VOICEOVER_SIZE: int = 500 * 1024 * 1024  # 500MB specifically for voiceover files
+    MAX_VIDEO_SIZE: int = 2 * 1024 * 1024 * 1024  # 2GB specifically for video files
     ALLOWED_SCRIPT_EXTENSIONS: List[str] = [".txt", ".docx"]
     ALLOWED_AUDIO_EXTENSIONS: List[str] = [".mp3", ".wav", ".m4a"]
     ALLOWED_VIDEO_EXTENSIONS: List[str] = [".mp4", ".avi", ".mov", ".mkv"]
