@@ -284,18 +284,23 @@ def run_video_creation_task_sync(job_id: str, job_data: Dict[str, Any]):
             clips_dir = output_dir / 'clips'
             clips_dir.mkdir(exist_ok=True)
             
-            for i, img_data in enumerate(generated_images):
-                progress = 30 + int((i / len(generated_images)) * 40)  # 30-70% for clips
-                update_job_status_sync(job_id, "processing", f"Creating clip {i+1} of {len(generated_images)}...", progress)
-                
-                clip_path = clips_dir / f"clip_{i+1:03d}.mp4"
-                video_proc.image_to_video(
-                    img_data['path'],
-                    str(clip_path),
-                    duration=img_data['duration']
-                )
+            # Try fast method first
+            fast_video = video_proc.images_to_clips_fast(generated_images, str(clips_dir))
             
-            results['clips'] = str(clips_dir)
+            if fast_video:
+                # Fast method succeeded, we have a single video file
+                update_job_status_sync(job_id, "processing", "Created all clips in single pass", 70)
+                results['clips'] = str(clips_dir)
+            else:
+                # Use parallel processing for individual clips
+                update_job_status_sync(job_id, "processing", "Creating clips using parallel processing...", 40)
+                clip_paths = video_proc.images_to_clips(generated_images, str(clips_dir))
+                
+                if clip_paths:
+                    update_job_status_sync(job_id, "processing", f"Created {len(clip_paths)} clips", 70)
+                    results['clips'] = str(clips_dir)
+                else:
+                    logger.warning("No clips were created")
         
         # Create full video if requested
         if create_full_video:

@@ -6,8 +6,10 @@ import logging
 import random
 import subprocess
 import json
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Dict
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import multiprocessing
 from .ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
 
 logger = logging.getLogger(__name__)
@@ -52,13 +54,15 @@ class VideoProcessor:
             if progress_callback:
                 progress_callback(25)
             
-            # Build FFmpeg command
+            # Build FFmpeg command with optimizations
             cmd = [
                 get_ffmpeg_path(),
                 '-f', 'concat',
                 '-safe', '0',
                 '-i', str(file_list_path),
-                '-c', 'copy',  # Copy streams without re-encoding for speed
+                '-c:v', 'copy',  # Copy video stream without re-encoding
+                '-c:a', 'copy',  # Copy audio stream if present
+                '-movflags', '+faststart',  # Optimize for streaming
                 '-y',  # Overwrite output file
                 str(output_path)
             ]
@@ -133,15 +137,18 @@ class VideoProcessor:
             output_dir = Path(output_path).parent
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            # Build FFmpeg command
+            # Build FFmpeg command with optimizations
             cmd = [
                 get_ffmpeg_path(),
                 '-loop', '1',  # Loop the image
                 '-i', image_path,
                 '-c:v', 'libx264',
+                '-preset', 'ultrafast',  # Fastest encoding
+                '-crf', '23',  # Good quality
                 '-t', str(duration),  # Duration in seconds
                 '-pix_fmt', 'yuv420p',
                 '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+                '-movflags', '+faststart',  # Optimize for streaming
                 '-y',
                 output_path
             ]
@@ -195,47 +202,140 @@ class VideoProcessor:
             logger.error(f"Error adding audio to video: {e}")
             raise
     
+    def _create_single_clip(self, args: tuple) -> Optional[str]:
+        """Helper function to create a single clip (for parallel processing)"""
+        i, image_info, output_dir = args
+        image_path = image_info.get('path', '')
+        
+        if not image_path or not os.path.exists(image_path):
+            logger.warning(f"Image not found: {image_path}")
+            return None
+        
+        clip_path = os.path.join(output_dir, f"clip_{i+1:03d}.mp4")
+        duration = image_info.get('duration', 3.0)
+        
+        # Use faster encoding settings
+        cmd = [
+            get_ffmpeg_path(),
+            '-loop', '1',
+            '-i', image_path,
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',  # Fastest encoding preset
+            '-crf', '23',  # Constant rate factor for good quality
+            '-t', str(duration),
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',  # Optimize for streaming
+            '-y',
+            clip_path
+        ]
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                return clip_path
+            else:
+                logger.error(f"FFmpeg error creating clip {i+1}: {result.stderr}")
+                return None
+        except Exception as e:
+            logger.error(f"Error creating clip {i+1}: {e}")
+            return None
+    
+    def images_to_clips_fast(self, image_data: List[dict], output_dir: str) -> Optional[str]:
+        """Fast method to create a single video from all images if they have the same duration"""
+        if not image_data:
+            return None
+            
+        # Check if all images have the same duration
+        durations = [img.get('duration', 3.0) for img in image_data]
+        if len(set(durations)) != 1:
+            # Different durations, can't use fast method
+            return None
+            
+        duration = durations[0]
+        logger.info(f"All images have same duration ({duration}s), using fast concatenation")
+        
+        # Create a file list for FFmpeg
+        output_path = os.path.join(output_dir, "all_clips.mp4")
+        file_list_path = os.path.join(output_dir, "images_list.txt")
+        
+        with open(file_list_path, 'w') as f:
+            for img in image_data:
+                if img.get('path') and os.path.exists(img['path']):
+                    f.write(f"file '{os.path.abspath(img['path'])}'\n")
+                    f.write(f"duration {duration}\n")
+            # Add the last image again (FFmpeg requirement)
+            if image_data and image_data[-1].get('path'):
+                f.write(f"file '{os.path.abspath(image_data[-1]['path'])}'\n")
+        
+        # Single FFmpeg command to create video from all images
+        cmd = [
+            get_ffmpeg_path(),
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', file_list_path,
+            '-vsync', 'vfr',
+            '-pix_fmt', 'yuv420p',
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-crf', '23',
+            '-movflags', '+faststart',
+            '-y',
+            output_path
+        ]
+        
+        try:
+            logger.info("Creating video from all images in single pass")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                # Clean up temp file
+                os.remove(file_list_path)
+                return output_path
+            else:
+                logger.error(f"FFmpeg error: {result.stderr}")
+                return None
+        except Exception as e:
+            logger.error(f"Error in fast image concatenation: {e}")
+            return None
+    
     def images_to_clips(self, image_data: List[dict], output_dir: str) -> List[str]:
-        """Convert images to video clips using FFmpeg"""
-        logger.info(f"Converting {len(image_data)} images to clips")
+        """Convert images to video clips using FFmpeg with parallel processing"""
+        logger.info(f"Converting {len(image_data)} images to clips using parallel processing")
+        
+        # Prepare arguments for parallel processing
+        args_list = [(i, image_info, output_dir) for i, image_info in enumerate(image_data)]
+        
+        # Use ThreadPoolExecutor for parallel processing
+        # Limit workers to CPU count for optimal performance
+        max_workers = min(multiprocessing.cpu_count(), len(image_data))
+        logger.info(f"Using {max_workers} parallel workers")
         
         clip_paths = []
-        for i, image_info in enumerate(image_data):
-            image_path = image_info.get('path', '')
-            if not image_path or not os.path.exists(image_path):
-                logger.warning(f"Image not found: {image_path}")
-                continue
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_index = {
+                executor.submit(self._create_single_clip, args): args[0] 
+                for args in args_list
+            }
             
-            # Create a video clip from the image
-            clip_path = os.path.join(output_dir, f"clip_{i+1:03d}.mp4")
-            duration = image_info.get('duration', 3.0)  # Default 3 seconds per image
-            
-            cmd = [
-                get_ffmpeg_path(),
-                '-loop', '1',
-                '-i', image_path,
-                '-c:v', 'libx264',
-                '-t', str(duration),
-                '-pix_fmt', 'yuv420p',
-                '-y',
-                clip_path
-            ]
-            
-            try:
-                logger.info(f"Creating clip {i+1}: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                if result.returncode == 0:
-                    clip_paths.append(clip_path)
-                else:
-                    logger.error(f"FFmpeg error creating clip {i+1}: {result.stderr}")
-            except Exception as e:
-                logger.error(f"Error creating clip {i+1}: {e}")
+            # Collect results as they complete
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                try:
+                    clip_path = future.result()
+                    if clip_path:
+                        clip_paths.append((index, clip_path))
+                except Exception as e:
+                    logger.error(f"Exception creating clip {index+1}: {e}")
         
-        return clip_paths
+        # Sort clips by index to maintain order
+        clip_paths.sort(key=lambda x: x[0])
+        sorted_paths = [path for _, path in clip_paths]
+        
+        logger.info(f"Successfully created {len(sorted_paths)} clips")
+        return sorted_paths
     
     def create_full_video(self, image_data: List[dict], audio_path: str, output_path: str) -> str:
-        """Create full video from images and audio"""
+        """Create full video from images and audio with optimizations"""
         logger.info(f"Creating full video with {len(image_data)} images")
         
         try:
@@ -243,25 +343,38 @@ class VideoProcessor:
             output_dir = Path(output_path).parent
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            # First convert images to clips
-            clips = self.images_to_clips(image_data, str(output_dir))
+            # Try fast method first if all images have same duration
+            fast_video = self.images_to_clips_fast(image_data, str(output_dir))
             
-            if not clips:
-                raise Exception("No valid clips created from images")
-            
-            # Then concatenate clips
-            temp_video = output_dir / "temp_video.mp4"
-            self.concatenate_clips(clips, str(temp_video))
-            
-            # Finally add audio
-            self.add_audio_to_video(str(temp_video), audio_path, output_path)
-            
-            # Clean up temp files
-            for clip in clips:
-                if os.path.exists(clip):
-                    os.remove(clip)
-            if temp_video.exists():
-                temp_video.unlink()
+            if fast_video:
+                # Fast method succeeded, just add audio
+                logger.info("Using fast video creation method")
+                self.add_audio_to_video(fast_video, audio_path, output_path)
+                
+                # Clean up temp file
+                if os.path.exists(fast_video):
+                    os.remove(fast_video)
+            else:
+                # Fall back to parallel clip creation
+                logger.info("Using parallel clip creation method")
+                clips = self.images_to_clips(image_data, str(output_dir))
+                
+                if not clips:
+                    raise Exception("No valid clips created from images")
+                
+                # Then concatenate clips
+                temp_video = output_dir / "temp_video.mp4"
+                self.concatenate_clips(clips, str(temp_video))
+                
+                # Finally add audio
+                self.add_audio_to_video(str(temp_video), audio_path, output_path)
+                
+                # Clean up temp files
+                for clip in clips:
+                    if os.path.exists(clip):
+                        os.remove(clip)
+                if temp_video.exists():
+                    temp_video.unlink()
             
             logger.info(f"Successfully created full video: {output_path}")
             return output_path
