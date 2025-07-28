@@ -3,7 +3,6 @@ import logging
 from pathlib import Path
 from typing import Optional
 import mimetypes
-import chardet
 
 logger = logging.getLogger(__name__)
 
@@ -48,26 +47,27 @@ class DocumentProcessor:
         return self._read_generic(file_path)
     
     def _read_text(self, file_path: Path) -> str:
-        """Read plain text files with encoding detection"""
-        try:
-            # Try UTF-8 first
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except UnicodeDecodeError:
-            # Detect encoding
-            with open(file_path, 'rb') as f:
-                raw_data = f.read()
-                result = chardet.detect(raw_data)
-                encoding = result.get('encoding', 'utf-8')
-            
+        """Read plain text files with multiple encoding attempts"""
+        # List of common encodings to try
+        encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252', 'iso-8859-1', 'ascii']
+        
+        for encoding in encodings:
             try:
                 with open(file_path, 'r', encoding=encoding) as f:
-                    return f.read()
-            except Exception as e:
-                logger.error(f"Failed to read text file with detected encoding {encoding}: {e}")
-                # Try with errors='ignore' as last resort
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    return f.read()
+                    content = f.read()
+                    # If successful, return the content
+                    return content
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        
+        # If all encodings fail, try with errors='ignore'
+        logger.warning(f"Could not detect encoding for {file_path}, reading with errors ignored")
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
+        except Exception as e:
+            logger.error(f"Failed to read file {file_path}: {e}")
+            return f"[Error reading file: {file_path.name}]"
     
     def _read_docx(self, file_path: Path) -> str:
         """Read DOCX files"""
