@@ -124,6 +124,42 @@ class VideoProcessor:
             logger.error(f"Error concatenating clips: {e}")
             raise
     
+    def image_to_video(self, image_path: str, output_path: str, duration: float = 5.0) -> str:
+        """Convert a single image to a video clip with specified duration"""
+        logger.info(f"Converting image {image_path} to video with duration {duration}s")
+        
+        try:
+            # Create output directory
+            output_dir = Path(output_path).parent
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Build FFmpeg command
+            cmd = [
+                get_ffmpeg_path(),
+                '-loop', '1',  # Loop the image
+                '-i', image_path,
+                '-c:v', 'libx264',
+                '-t', str(duration),  # Duration in seconds
+                '-pix_fmt', 'yuv420p',
+                '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+                '-y',
+                output_path
+            ]
+            
+            logger.info(f"Running FFmpeg command: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                logger.error(f"FFmpeg error: {result.stderr}")
+                raise Exception(f"FFmpeg image to video failed: {result.stderr}")
+            
+            logger.info(f"Successfully created video from image: {output_path}")
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"Error converting image to video: {e}")
+            raise
+    
     def add_audio_to_video(self, video_path: str, audio_path: str, output_path: str) -> str:
         """Add audio track to video using FFmpeg"""
         logger.info(f"Adding audio {audio_path} to video {video_path}")

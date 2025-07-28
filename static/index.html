@@ -86,9 +86,12 @@
                         <div class="dropzone p-8 rounded-lg text-center" id="voice-dropzone">
                             <i class="fas fa-microphone text-4xl text-gray-400 mb-4"></i>
                             <p class="text-gray-600 mb-2">Drop your voiceover file here or click to browse</p>
-                            <p class="text-sm text-gray-500">Supports .mp3, .wav, .m4a files (up to 500MB, 60 minutes)</p>
+                            <p class="text-sm text-gray-500">Supports .mp3, .wav, .m4a files (up to 1GB, 60 minutes)</p>
                             <input type="file" id="voice-file" class="hidden" accept=".mp3,.wav,.m4a">
                         </div>
+                        <!-- Debug button for testing -->
+                        <button onclick="document.getElementById('voice-file-test').click()" class="mt-2 px-4 py-2 bg-gray-500 text-white rounded">Test Upload (Debug)</button>
+                        <input type="file" id="voice-file-test" class="hidden" accept=".mp3,.wav,.m4a">
                         <div id="voice-info" class="hidden mt-4 p-4 bg-green-50 rounded-lg">
                             <p class="text-green-800"><i class="fas fa-check-circle mr-2"></i><span id="voice-filename"></span></p>
                         </div>
@@ -128,18 +131,7 @@
                             </div>
 
                             <div class="space-y-2">
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="export-images" checked class="mr-2">
-                                    <span class="text-sm">Export Still Images</span>
-                                </label>
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="export-clips" checked class="mr-2">
-                                    <span class="text-sm">Export Video Clips</span>
-                                </label>
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="export-full-video" class="mr-2">
-                                    <span class="text-sm">Create Full Video</span>
-                                </label>
+                                <p class="text-sm text-gray-600 mb-2">Image generation only - video creation will be available after images are generated</p>
                             </div>
                         </div>
 
@@ -174,6 +166,46 @@
                 <div id="ai-preview-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     <!-- Images will be added here dynamically -->
                 </div>
+                
+                <!-- Video Creation Section -->
+                <div id="video-creation-section" class="mt-6 pt-6 border-t border-gray-200">
+                    <h4 class="text-lg font-semibold mb-4">🎬 Create Video from Images</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="space-y-3">
+                            <label class="flex items-center">
+                                <input type="checkbox" id="create-clips" checked class="mr-2">
+                                <span class="text-sm">Create individual video clips</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="checkbox" id="create-full-video" checked class="mr-2">
+                                <span class="text-sm">Create full video with voiceover</span>
+                            </label>
+                        </div>
+                        <div class="flex items-end">
+                            <button id="create-video-btn" class="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                                <i class="fas fa-video mr-2"></i>Create Video
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Video Progress Section -->
+            <div id="video-progress-section" class="mt-6 bg-white rounded-lg shadow-md p-6 hidden">
+                <h3 class="text-lg font-semibold mb-4">Video Creation Progress</h3>
+                <div class="relative pt-1">
+                    <div class="flex mb-2 items-center justify-between">
+                        <div>
+                            <span class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-green-600 bg-green-200">
+                                <span id="video-progress-percent">0</span>%
+                            </span>
+                        </div>
+                    </div>
+                    <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-green-200">
+                        <div id="video-progress-bar" style="width:0%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-green-600 transition-all duration-500"></div>
+                    </div>
+                </div>
+                <div id="video-status" class="text-sm text-gray-600"></div>
             </div>
         </div>
 
@@ -188,7 +220,7 @@
                         <div class="dropzone p-8 rounded-lg text-center" id="broll-dropzone">
                             <i class="fas fa-video text-4xl text-gray-400 mb-4"></i>
                             <p class="text-gray-600 mb-2">Drop your B-roll clips here or click to browse</p>
-                            <p class="text-sm text-gray-500">Supports multiple .mp4, .avi, .mov, .mkv files (up to 2GB, 60 minutes each)</p>
+                            <p class="text-sm text-gray-500">Supports multiple .mp4, .avi, .mov, .mkv files (up to 5GB, 60 minutes each)</p>
                             <input type="file" id="broll-files" class="hidden" accept=".mp4,.avi,.mov,.mkv" multiple>
                         </div>
                         <div id="broll-list" class="mt-4 space-y-2"></div>
@@ -200,7 +232,7 @@
                         <div class="dropzone p-8 rounded-lg text-center" id="intro-dropzone">
                             <i class="fas fa-film text-4xl text-gray-400 mb-4"></i>
                             <p class="text-gray-600 mb-2">Drop your intro clips here or click to browse</p>
-                            <p class="text-sm text-gray-500">These will play before the B-roll (up to 2GB, 60 minutes each)</p>
+                            <p class="text-sm text-gray-500">These will play before the B-roll (up to 5GB, 60 minutes each)</p>
                             <input type="file" id="intro-files" class="hidden" accept=".mp4,.avi,.mov,.mkv" multiple>
                         </div>
                         <div id="intro-list" class="mt-4 space-y-2"></div>
@@ -212,7 +244,7 @@
                         <div class="dropzone p-8 rounded-lg text-center" id="broll-voice-dropzone">
                             <i class="fas fa-headphones text-4xl text-gray-400 mb-4"></i>
                             <p class="text-gray-600 mb-2">Drop your voiceover file here or click to browse</p>
-                            <p class="text-sm text-gray-500">The video will sync to this audio (up to 500MB, 60 minutes)</p>
+                            <p class="text-sm text-gray-500">The video will sync to this audio (up to 1GB, 60 minutes)</p>
                             <input type="file" id="broll-voice-file" class="hidden" accept=".mp3,.wav,.m4a">
                         </div>
                         <div id="broll-voice-info" class="hidden mt-4 p-4 bg-green-50 rounded-lg">
@@ -350,6 +382,66 @@
         </div>
     </div>
 
+    <!-- Image Viewer Modal -->
+    <div id="image-viewer-modal" class="fixed inset-0 bg-black bg-opacity-75 hidden z-50 overflow-y-auto">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
+                <!-- Modal Header -->
+                <div class="bg-gray-800 text-white p-4 flex justify-between items-center">
+                    <h2 class="text-xl font-bold">
+                        <i class="fas fa-images mr-2"></i>Generated Images
+                    </h2>
+                    <button onclick="closeModal('image-viewer-modal')" class="text-white hover:text-gray-300">
+                        <i class="fas fa-times text-2xl"></i>
+                    </button>
+                </div>
+                
+                <!-- Modal Content -->
+                <div class="p-6 overflow-y-auto max-h-[calc(90vh-8rem)]">
+                    <!-- Script/Prompt Section -->
+                    <div class="mb-6 bg-gray-100 rounded-lg p-4">
+                        <h3 class="text-lg font-semibold mb-2">
+                            <i class="fas fa-file-alt mr-2"></i>Script/Prompt Used:
+                        </h3>
+                        <div id="image-prompt-text" class="text-sm text-gray-700 whitespace-pre-wrap bg-white p-3 rounded border border-gray-300 max-h-40 overflow-y-auto"></div>
+                    </div>
+                    
+                    <!-- Images Grid -->
+                    <div class="mb-4">
+                        <h3 class="text-lg font-semibold mb-4">
+                            <i class="fas fa-photo-video mr-2"></i>Generated Images:
+                        </h3>
+                        <div id="generated-images-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <!-- Images will be inserted here dynamically -->
+                        </div>
+                    </div>
+                    
+                    <!-- Navigation Controls -->
+                    <div id="image-navigation" class="flex justify-center items-center space-x-4 mt-6 hidden">
+                        <button onclick="previousImage()" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+                            <i class="fas fa-chevron-left mr-2"></i>Previous
+                        </button>
+                        <span id="image-counter" class="text-gray-600 font-medium"></span>
+                        <button onclick="nextImage()" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+                            Next<i class="fas fa-chevron-right ml-2"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Modal Footer -->
+                <div class="bg-gray-100 p-4 flex justify-between items-center">
+                    <div class="text-sm text-gray-600">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        <span id="generation-info"></span>
+                    </div>
+                    <button onclick="closeModal('image-viewer-modal')" class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/app.js"></script>
     <script>
       // Toggle API key visibility
@@ -383,6 +475,54 @@
           });
         });
       });
+      
+      // Simple inline test for debugging
+      function testFileInput() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.mp3,.wav,.m4a';
+        input.onchange = function(e) {
+          console.log('=== INLINE FILE TEST ===');
+          console.log('Event:', e);
+          console.log('Files:', e.target.files);
+          console.log('Files length:', e.target.files.length);
+          
+          if (e.target.files.length > 0) {
+            const file = e.target.files[0];
+            console.log('File object:', file);
+            
+            try {
+              console.log('File name:', file.name);
+              console.log('File size:', file.size);
+              console.log('File type:', file.type);
+              
+              // Try to upload
+              const formData = new FormData();
+              formData.append('file', file);
+              
+              fetch('/api/test-upload', {
+                method: 'POST',
+                body: formData
+              })
+              .then(res => {
+                console.log('Response status:', res.status);
+                return res.json();
+              })
+              .then(data => {
+                console.log('Response data:', data);
+              })
+              .catch(err => {
+                console.error('Fetch error:', err);
+              });
+              
+            } catch (error) {
+              console.error('Error accessing file:', error);
+            }
+          }
+        };
+        document.body.appendChild(input);
+        input.click();
+      }
     </script>
 </body>
 </html>

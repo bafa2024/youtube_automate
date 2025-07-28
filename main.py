@@ -111,6 +111,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Set maximum request body size to 5GB
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+import starlette.status as starlette_status
+
+class MaxBodySizeMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, max_body_size: int = 5 * 1024 * 1024 * 1024):  # 5GB default
+        super().__init__(app)
+        self.max_body_size = max_body_size
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method in ["POST", "PUT", "PATCH"]:
+            content_length = request.headers.get("content-length")
+            if content_length:
+                content_length = int(content_length)
+                if content_length > self.max_body_size:
+                    return JSONResponse(
+                        status_code=starlette_status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        content={"detail": f"Request body too large. Maximum size is {self.max_body_size // (1024*1024)} MB"}
+                    )
+        response = await call_next(request)
+        return response
+
+# Add the middleware
+app.add_middleware(MaxBodySizeMiddleware, max_body_size=5 * 1024 * 1024 * 1024)
+
 # Database setup
 # Removed: engine = create_async_engine(settings.DATABASE_URL, echo=True)
 # Removed: async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -140,6 +166,11 @@ class BRollOrganizationRequest(BaseModel):
     voiceover_id: Optional[str] = Field(None, description="Voiceover UUID")
     sync_to_voiceover: bool = Field(True, description="Sync video to voiceover duration")
     overlay_audio: bool = Field(True, description="Overlay voiceover on final video")
+
+class CreateVideoRequest(BaseModel):
+    original_job_id: str = Field(..., description="Job ID of the completed AI image generation")
+    create_clips: bool = Field(True, description="Create individual video clips from images")
+    create_full_video: bool = Field(True, description="Create full video with voiceover")
 
 class JobResponse(BaseModel):
     job_id: str
@@ -177,29 +208,53 @@ def cleanup_old_files():
 
 async def save_upload_file(upload_file: UploadFile, upload_type: str = "general") -> Dict[str, Any]:
     """Save uploaded file and return file info"""
-    file_id = str(uuid.uuid4())
-    file_extension = Path(upload_file.filename).suffix
-    saved_filename = f"{file_id}{file_extension}"
-    file_path = Path(settings.UPLOAD_DIR) / upload_type / saved_filename
+    logger.info(f"=== save_upload_file called ===")
+    logger.info(f"Upload type: {upload_type}")
+    logger.info(f"Filename: {upload_file.filename}")
     
-    # Create type-specific directory
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Save file by streaming in chunks to avoid memory issues
-    total_size = 0
-    async with aiofiles.open(file_path, 'wb') as f:
-        while chunk := await upload_file.read(8192):  # Read in 8KB chunks
-            await f.write(chunk)
-            total_size += len(chunk)
-    
-    return {
-        "file_id": file_id,
-        "filename": upload_file.filename,
-        "saved_path": str(file_path),
-        "file_type": upload_type,
-        "size": total_size,
-        "upload_time": datetime.now()
-    }
+    try:
+        file_id = str(uuid.uuid4())
+        file_extension = Path(upload_file.filename).suffix
+        saved_filename = f"{file_id}{file_extension}"
+        file_path = Path(settings.UPLOAD_DIR) / upload_type / saved_filename
+        
+        logger.info(f"Target path: {file_path}")
+        
+        # Create type-specific directory
+        try:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Directory created/verified: {file_path.parent}")
+        except Exception as e:
+            logger.error(f"Failed to create directory: {e}")
+            raise HTTPException(500, f"Failed to create upload directory: {e}")
+        
+        # Save file by streaming in chunks to avoid memory issues
+        total_size = 0
+        try:
+            async with aiofiles.open(file_path, 'wb') as f:
+                while chunk := await upload_file.read(8192):  # Read in 8KB chunks
+                    await f.write(chunk)
+                    total_size += len(chunk)
+            logger.info(f"File saved successfully, size: {total_size} bytes")
+        except Exception as e:
+            logger.error(f"Failed to save file: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            raise HTTPException(500, f"Failed to save file: {e}")
+        
+        return {
+            "file_id": file_id,
+            "filename": upload_file.filename,
+            "saved_path": str(file_path),
+            "file_type": upload_type,
+            "size": total_size,
+            "upload_time": datetime.now()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in save_upload_file: {e}")
+        logger.error(f"Error type: {type(e).__name__}")
+        raise HTTPException(500, f"Unexpected error saving file: {e}")
 
 # Helper function for database operations
 # Removed: async def get_db_session(): ...
@@ -220,6 +275,50 @@ async def health_check():
         "timestamp": datetime.now(),
         "version": "1.0.0"
     }
+
+@app.post("/api/test-upload")
+async def test_upload(
+    file: UploadFile = File(...),
+):
+    """Test endpoint for debugging uploads"""
+    logger.info("=== TEST UPLOAD ===")
+    try:
+        logger.info(f"File: {file.filename}")
+        logger.info(f"Content-Type: {file.content_type}")
+        
+        # Try to read a small chunk first
+        first_chunk = await file.read(1024)
+        logger.info(f"Read first chunk: {len(first_chunk)} bytes")
+        
+        # Reset file position
+        await file.seek(0)
+        
+        # Read file size
+        contents = await file.read()
+        size = len(contents)
+        logger.info(f"Total size read: {size} bytes")
+        
+        return {
+            "status": "success",
+            "filename": file.filename,
+            "content_type": file.content_type,
+            "size": size,
+            "size_mb": round(size / (1024 * 1024), 2)
+        }
+    except Exception as e:
+        logger.error(f"Test upload error: {e}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "filename": file.filename if file else "unknown"
+            }
+        )
 
 @app.post("/api/upload/script", response_model=FileUploadResponse)
 async def upload_script(
@@ -254,14 +353,31 @@ async def upload_audio(
     file: UploadFile = File(..., description="Audio file (.mp3, .wav, .m4a)"),
 ):
     """Upload an audio file (voiceover)"""
+    logger.info(f"=== Audio Upload Request ===")
+    logger.info(f"Filename: {file.filename}")
+    logger.info(f"Content Type: {file.content_type}")
+    logger.info(f"File size (if available): {getattr(file, 'size', 'Unknown')}")
+    
     try:
-        if not file.filename.endswith((".mp3", ".wav", ".m4a")):
+        # Check file extension
+        if not file.filename:
+            logger.error("No filename provided")
+            raise HTTPException(400, "No filename provided")
+        
+        logger.info(f"Checking file extension for: '{file.filename}'")
+        logger.info(f"Filename type: {type(file.filename)}")
+        logger.info(f"Filename repr: {repr(file.filename)}")
+        
+        # Check extension case-insensitively
+        filename_lower = file.filename.lower()
+        if not filename_lower.endswith((".mp3", ".wav", ".m4a")):
             logger.error(f"Rejected file with invalid extension: {file.filename}")
+            logger.error(f"Filename ends with: {file.filename[-4:]}")
             raise HTTPException(400, "Only .mp3, .wav, and .m4a files are supported")
         
         # Check file size before processing (if available)
         if hasattr(file, 'size') and file.size:
-            max_size = getattr(settings, 'MAX_VOICEOVER_SIZE', 500 * 1024 * 1024)  # 500MB for voiceover files
+            max_size = getattr(settings, 'MAX_VOICEOVER_SIZE', 1 * 1024 * 1024 * 1024)  # 1GB for voiceover files
             if file.size > max_size:
                 logger.error(f"Voiceover file too large: {file.size} bytes (limit: {max_size} bytes)")
                 raise HTTPException(413, f"Voiceover file too large. Max allowed size is {max_size // (1024*1024)} MB.")
@@ -270,7 +386,7 @@ async def upload_audio(
         file_info = await save_upload_file(file, "audio")
         
         # Check size after saving (in case size wasn't available before)
-        max_size = getattr(settings, 'MAX_VOICEOVER_SIZE', 500 * 1024 * 1024)  # 500MB for voiceover files
+        max_size = getattr(settings, 'MAX_VOICEOVER_SIZE', 1 * 1024 * 1024 * 1024)  # 1GB for voiceover files
         if file_info["size"] > max_size:
             logger.error(f"Voiceover file too large: {file_info['size']} bytes (limit: {max_size} bytes)")
             # Clean up the saved file
@@ -313,9 +429,16 @@ async def upload_audio(
             logger.error(f"Database error in create_file: {db_exc}")
             raise HTTPException(500, f"Database error: {db_exc}")
         return FileUploadResponse(**file_info)
+    except HTTPException as http_exc:
+        # Re-raise HTTP exceptions as-is
+        logger.error(f"HTTP Exception in voiceover upload: {http_exc.detail}")
+        raise http_exc
     except Exception as exc:
-        logger.error(f"Voiceover upload failed: {exc}")
-        raise HTTPException(500, f"Voiceover upload failed: {exc}")
+        logger.error(f"Voiceover upload failed with unexpected error: {exc}")
+        logger.error(f"Error type: {type(exc).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(500, f"Voiceover upload failed: {str(exc)} (Type: {type(exc).__name__})")
 
 @app.post("/api/upload/video", response_model=FileUploadResponse)
 async def upload_video(
@@ -490,6 +613,72 @@ async def generate_ai_images(
     except Exception as exc:
         logger.error(f"Image generation request failed: {exc}")
         raise HTTPException(500, f"Image generation request failed: {exc}")
+
+@app.post("/api/generate/video", response_model=JobResponse)
+async def create_video_from_images(
+    request: CreateVideoRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Create video from previously generated AI images"""
+    # Get the original job to retrieve image data
+    original_job = await get_job_by_id(request.original_job_id)
+    if not original_job:
+        raise HTTPException(404, "Original job not found")
+    
+    if original_job['status'] != 'completed':
+        raise HTTPException(400, "Original job must be completed before creating video")
+    
+    # Parse result to get image paths
+    if not original_job.get('result'):
+        raise HTTPException(400, "No images found in original job")
+    
+    try:
+        result_data = json.loads(original_job['result'])
+    except:
+        raise HTTPException(400, "Invalid job result data")
+    
+    # Create new job for video creation
+    job_id = str(uuid.uuid4())
+    created_at = datetime.now().isoformat()
+    await create_job(
+        job_id=job_id,
+        user_id=None,
+        status="pending",
+        message="Video creation job started",
+        created_at=created_at,
+        job_type="video_creation",
+        params=json.dumps({
+            "original_job_id": request.original_job_id,
+            "create_clips": request.create_clips,
+            "create_full_video": request.create_full_video
+        })
+    )
+    
+    # Run task synchronously in background
+    from tasks import run_video_creation_task_sync
+    
+    threading.Thread(
+        target=run_video_creation_task_sync,
+        args=(job_id, {
+            "job_type": "video_creation",
+            "user_id": None,
+            "params": {
+                "original_job_id": request.original_job_id,
+                "original_result": result_data,
+                "create_clips": request.create_clips,
+                "create_full_video": request.create_full_video
+            }
+        })
+    ).start()
+    
+    return JobResponse(
+        job_id=job_id,
+        status="pending",
+        message="Video creation job started",
+        created_at=created_at,
+        progress=0,
+        result_url=None
+    )
 
 @app.post("/api/generate/broll", response_model=JobResponse)
 async def organize_broll(
@@ -681,8 +870,15 @@ async def download_result(
 @app.get("/api/files/serve/{file_path:path}")
 async def serve_file(file_path: str):
     """Serve generated files (images, videos, etc.)"""
-    # Construct full path
-    full_path = Path(file_path)
+    # Try to construct full path - handle both absolute and relative paths
+    if Path(file_path).is_absolute():
+        full_path = Path(file_path)
+    else:
+        # Try outputs directory first (for job_id/filename.png format)
+        full_path = Path(settings.OUTPUT_DIR) / file_path
+        if not full_path.exists():
+            # Try uploads directory
+            full_path = Path(settings.UPLOAD_DIR) / file_path
     
     # Security check - ensure file is within allowed directories
     allowed_dirs = [

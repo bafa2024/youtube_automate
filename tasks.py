@@ -144,7 +144,8 @@ def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
         generated_images = []
         
         for i, (segment, timestamp) in enumerate(zip(script_segments, timestamps)):
-            progress = 20 + int((i / image_count) * 60)  # 20-80% for image generation
+            # More granular progress calculation
+            progress = 20 + int(((i + 0.5) / image_count) * 60)  # 20-80% for image generation
             update_job_status_sync(job_id, "processing", f"Generating image {i+1} of {image_count}...", progress)
             
             # Create prompt
@@ -189,31 +190,141 @@ def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
                 'job_id': job_id
             }, f, indent=2)
         
-        # Export based on options
+        # Store results - only images for now
         results = {'images': str(output_dir)}
         
-        if export_options.get('clips', False):
-            update_job_status_sync(job_id, "processing", "Creating video clips from images...", 85)
-            video_proc.images_to_clips(generated_images, str(output_dir))
-            results['clips'] = str(output_dir)
+        # Prepare result data with image paths relative to output directory
+        image_filenames = []
+        for img in generated_images:
+            # Get just the filename from the full path
+            filename = Path(img['path']).name
+            image_filenames.append(f"{job_id}/{filename}")
         
-        if export_options.get('full_video', False):
-            update_job_status_sync(job_id, "processing", "Creating full video with voiceover...", 90)
-            final_video_path = output_dir / 'final_video.mp4'
+        result_data = {
+            "images": image_filenames,
+            "script_text": script_text,
+            "output_dir": str(output_dir),
+            "image_count": len(generated_images),
+            "style": style,
+            "character_description": character_desc
+        }
+        
+        # Update progress to 95% before final updates
+        update_job_status_sync(job_id, "processing", "Finalizing results...", 95)
+        
+        # Small delay to ensure progress is visible
+        time.sleep(0.5)
+        
+        # Update job as completed with result data
+        update_job_status_sync(job_id, "completed", "AI image generation completed!", 100, str(output_dir), result_data)
+        
+        return {
+            "status": "success",
+            "job_id": job_id,
+            "results": results,
+            "result_data": result_data
+        }
+        
+    except Exception as e:
+        # Handle errors
+        import traceback
+        error_traceback = traceback.format_exc()
+        
+        update_job_status_sync(job_id, "failed", f"Error: {str(e)}", 0)
+        raise
+
+def run_video_creation_task_sync(job_id: str, job_data: Dict[str, Any]):
+    """Synchronous task to create video from previously generated images"""
+    try:
+        # Update job status to processing
+        update_job_status_sync(
+            job_id=job_id,
+            status="processing",
+            message="Initializing video creation...",
+            progress=5
+        )
+        
+        # Extract parameters
+        params = job_data['params']
+        original_result = params['original_result']
+        create_clips = params.get('create_clips', True)
+        create_full_video = params.get('create_full_video', True)
+        
+        # Get paths from original job
+        output_dir = Path(original_result['output_dir'])
+        script_text = original_result.get('script_text', '')
+        
+        # Load metadata
+        metadata_path = output_dir / 'generation_metadata.json'
+        if not metadata_path.exists():
+            raise Exception("Generation metadata not found")
+        
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+        
+        generated_images = metadata['images']
+        voice_path = metadata['voice_path']
+        
+        # Initialize processors
+        update_job_status_sync(job_id, "processing", "Preparing video processors...", 10)
+        video_proc = VideoProcessor()
+        
+        results = {}
+        
+        # Create video clips if requested
+        if create_clips:
+            update_job_status_sync(job_id, "processing", "Creating video clips from images...", 30)
+            clips_dir = output_dir / 'clips'
+            clips_dir.mkdir(exist_ok=True)
+            
+            for i, img_data in enumerate(generated_images):
+                progress = 30 + int((i / len(generated_images)) * 40)  # 30-70% for clips
+                update_job_status_sync(job_id, "processing", f"Creating clip {i+1} of {len(generated_images)}...", progress)
+                
+                clip_path = clips_dir / f"clip_{i+1:03d}.mp4"
+                video_proc.image_to_video(
+                    img_data['path'],
+                    str(clip_path),
+                    duration=img_data['duration']
+                )
+            
+            results['clips'] = str(clips_dir)
+        
+        # Create full video if requested
+        if create_full_video:
+            update_job_status_sync(job_id, "processing", "Creating full video with voiceover...", 75)
+            final_video_path = output_dir / 'final_video_with_audio.mp4'
             video_proc.create_full_video(
                 generated_images, 
                 voice_path, 
                 str(final_video_path)
             )
             results['video'] = str(final_video_path)
+            
+            # Update progress
+            update_job_status_sync(job_id, "processing", "Finalizing video...", 90)
+        
+        # Prepare result data
+        result_data = {
+            "clips_created": create_clips,
+            "full_video_created": create_full_video,
+            "output_dir": str(output_dir),
+            "results": results
+        }
+        
+        if 'clips' in results:
+            result_data['clips_path'] = results['clips']
+        if 'video' in results:
+            result_data['video_path'] = results['video']
         
         # Update job as completed
-        update_job_status_sync(job_id, "completed", "AI image generation completed!", 100, str(output_dir))
+        update_job_status_sync(job_id, "completed", "Video creation completed!", 100, results.get('video', str(output_dir)), result_data)
         
         return {
             "status": "success",
             "job_id": job_id,
-            "results": results
+            "results": results,
+            "result_data": result_data
         }
         
     except Exception as e:
@@ -396,7 +507,8 @@ def generate_ai_images_task(self, job_id: str, job_data: Dict[str, Any]):
             if self.is_aborted():
                 raise Exception("Task cancelled by user")
             
-            progress = 20 + int((i / image_count) * 60)  # 20-80% for image generation
+            # More granular progress calculation
+            progress = 20 + int(((i + 0.5) / image_count) * 60)  # 20-80% for image generation
             self.update_progress(progress, f"Generating image {i+1} of {image_count}...")
             
             # Create prompt
@@ -455,31 +567,23 @@ def generate_ai_images_task(self, job_id: str, job_data: Dict[str, Any]):
                 'job_id': job_id
             }, f, indent=2)
         
-        # Export based on options
+        # Store results - only images for now
         results = {'images': str(output_dir)}
         
-        if export_options.get('clips', False):
-            self.update_progress(85, "Creating video clips from images...")
-            video_proc.images_to_clips(generated_images, str(output_dir))
-            results['clips'] = str(output_dir)
+        # Prepare result data with image paths relative to output directory
+        image_filenames = []
+        for img in generated_images:
+            # Get just the filename from the full path
+            filename = Path(img['path']).name
+            image_filenames.append(f"{job_id}/{filename}")
         
-        if export_options.get('full_video', False):
-            self.update_progress(90, "Creating full video with voiceover...")
-            final_video_path = output_dir / 'final_video.mp4'
-            video_proc.create_full_video(
-                generated_images, 
-                voice_path, 
-                str(final_video_path)
-            )
-            results['video'] = str(final_video_path)
-        
-        # Update job as completed
-        self.update_progress(100, "AI image generation completed!")
-        
-        # Prepare result with image paths
         result_data = {
-            "images": [img['path'] for img in generated_images],
+            "images": image_filenames,
+            "script_text": script_text,
             "output_dir": str(output_dir),
+            "image_count": len(generated_images),
+            "style": style,
+            "character_description": character_desc,
             "metadata_path": str(metadata_path)
         }
         
@@ -487,6 +591,9 @@ def generate_ai_images_task(self, job_id: str, job_data: Dict[str, Any]):
             result_data['clips'] = results['clips']
         if 'video' in results:
             result_data['video'] = results['video']
+        
+        # Update progress to 95% before final updates
+        self.update_progress(95, "Finalizing results...")
         
         # Update job status to completed
         try:
@@ -500,6 +607,12 @@ def generate_ai_images_task(self, job_id: str, job_data: Dict[str, Any]):
             )
         except Exception as e:
             print(f"Failed to update job completion status: {e}")
+        
+        # Final progress update to ensure it reaches 100%
+        self.update_progress(100, "AI image generation completed!")
+        
+        # Small delay to ensure the update is sent
+        time.sleep(0.5)
         
         return {
             "status": "success",

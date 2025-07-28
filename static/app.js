@@ -43,6 +43,14 @@ function initializeApp() {
     // Setup event listeners
     setupEventListeners();
     
+    // Setup debug test upload button
+    const testInput = document.getElementById('voice-file-test');
+    if (testInput) {
+        testInput.addEventListener('change', function(e) {
+            testDirectUpload(e.target.files);
+        });
+    }
+    
     // Check API key status for public app
     checkApiKey();
     
@@ -75,6 +83,12 @@ function setupEventListeners() {
         console.log('✅ Event listener added to organize-btn');
     } else {
         console.error('❌ organize-btn element not found!');
+    }
+    
+    // Video creation button
+    const createVideoBtn = document.getElementById('create-video-btn');
+    if (createVideoBtn) {
+        createVideoBtn.addEventListener('click', createVideoFromImages);
     }
 }
 
@@ -215,6 +229,12 @@ function setupDropzone(dropzoneId, inputId, handler) {
     });
     
     input.addEventListener('change', (e) => {
+        console.log('File input change event:', e);
+        console.log('Files from input:', e.target.files);
+        console.log('Files length:', e.target.files.length);
+        if (e.target.files.length > 0) {
+            console.log('First file:', e.target.files[0]);
+        }
         handler(e.target.files);
     });
 }
@@ -248,17 +268,93 @@ async function handleScriptUpload(files) {
 }
 
 async function handleVoiceUpload(files) {
-    const file = files[0];
-    if (!file) return;
+    console.log('handleVoiceUpload called');
+    console.log('Files parameter:', files);
+    console.log('Files type:', typeof files);
+    console.log('Files constructor:', files?.constructor?.name);
+    
+    let file;
+    try {
+        // Handle both FileList and array-like objects
+        if (!files || (typeof files === 'object' && !files.length)) {
+            console.error('No files provided or empty files object');
+            return;
+        }
+        
+        file = files[0];
+        console.log('First file:', file);
+        console.log('File type:', typeof file);
+        console.log('File constructor:', file?.constructor?.name);
+        
+        if (!file) {
+            console.error('No file at index 0');
+            return;
+        }
+    } catch (e) {
+        console.error('Error accessing files array:', e);
+        showNotification('Error: Unable to access file', 'error');
+        return;
+    }
+    
+    try {
+        // Test with simple upload first
+        console.log('Testing with /api/test-upload first...');
+        const testFormData = new FormData();
+        testFormData.append('file', file);
+        
+        const testResponse = await fetch(apiUrl('/api/test-upload'), {
+            method: 'POST',
+            body: testFormData
+        });
+        
+        console.log('Test upload response:', testResponse.status);
+        const testResult = await testResponse.json();
+        console.log('Test upload result:', testResult);
+        
+        if (!testResponse.ok) {
+            console.error('Test upload failed, aborting');
+            showNotification('Test upload failed: ' + (testResult.error || 'Unknown error'), 'error');
+            return;
+        }
+        
+        console.log('Test upload successful, proceeding with actual upload...');
+        
+    } catch (e) {
+        console.error('Error in test upload:', e);
+        showNotification('Error in test upload: ' + e.message, 'error');
+        return;
+    }
+    
+    // Now proceed with actual audio upload
+    console.log('Preparing actual audio upload...');
+    console.log('File details for audio upload:');
+    console.log('- Name:', file.name);
+    console.log('- Type:', file.type);
+    console.log('- Size:', file.size);
     
     const formData = new FormData();
     formData.append('file', file);
     
+    // Log FormData entries
+    console.log('FormData entries:');
+    for (let [key, value] of formData.entries()) {
+        console.log(`- ${key}:`, value);
+        if (value instanceof File) {
+            console.log('  - File name:', value.name);
+            console.log('  - File type:', value.type);
+            console.log('  - File size:', value.size);
+        }
+    }
+    
     try {
+        console.log('Sending request to:', apiUrl('/api/upload/audio'));
         const response = await fetch(apiUrl('/api/upload/audio'), {
             method: 'POST',
             body: formData
         });
+        
+        console.log('Response status:', response.status);
+        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
         
         if (response.ok) {
             const data = await response.json();
@@ -268,9 +364,30 @@ async function handleVoiceUpload(files) {
             updateGenerateButtons();
             showNotification('Voiceover uploaded successfully!', 'success');
         } else {
-            showNotification('Failed to upload voiceover', 'error');
+            let errorMessage = 'Failed to upload voiceover';
+            const contentType = response.headers.get('content-type');
+            console.log('Error response content-type:', contentType);
+            
+            try {
+                if (contentType && contentType.includes('application/json')) {
+                    const errorData = await response.json();
+                    errorMessage = errorData.detail || errorMessage;
+                    console.error('Error JSON:', errorData);
+                } else {
+                    errorMessage = await response.text() || errorMessage;
+                    console.error('Error text:', errorMessage);
+                }
+            } catch (e) {
+                console.error('Error parsing response:', e);
+                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            }
+            console.error('Voiceover upload error:', errorMessage);
+            showNotification(errorMessage, 'error');
         }
     } catch (error) {
+        console.error('Network/Upload error:', error);
+        console.error('Error type:', error.constructor.name);
+        console.error('Error stack:', error.stack);
         showNotification('Upload error: ' + error.message, 'error');
     }
 }
@@ -346,9 +463,18 @@ async function handleBrollVoiceUpload(files) {
             document.getElementById('broll-voice-filename').textContent = data.filename;
             showNotification('Voiceover uploaded successfully!', 'success');
         } else {
-            showNotification('Failed to upload voiceover', 'error');
+            let errorMessage = 'Failed to upload voiceover';
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData.detail || errorMessage;
+            } catch (e) {
+                errorMessage = await response.text() || errorMessage;
+            }
+            console.error('B-roll voiceover upload error:', errorMessage);
+            showNotification(errorMessage, 'error');
         }
     } catch (error) {
+        console.error('Upload error:', error);
         showNotification('Upload error: ' + error.message, 'error');
     }
 }
@@ -420,6 +546,9 @@ async function generateAIImages() {
             scriptText = 'Generate images based on the uploaded script content.';
         }
         
+        // Store script text for later use in modal
+        uploadedFiles.scriptText = scriptText;
+        
         console.log('Preparing generation request...');
         const formData = new FormData();
         formData.append('script_file_id', uploadedFiles.script.file_id);
@@ -430,9 +559,9 @@ async function generateAIImages() {
         formData.append('character_description', document.getElementById('character-desc').value || 'High quality visuals');
         formData.append('voice_duration', '60'); // Will be calculated server-side
         formData.append('export_options', JSON.stringify({
-            images: document.getElementById('export-images').checked,
-            clips: document.getElementById('export-clips').checked,
-            full_video: document.getElementById('export-full-video').checked
+            images: true,
+            clips: false,
+            full_video: false
         }));
         
         console.log('Sending generation request...');
@@ -691,20 +820,29 @@ function trackJob(jobId, type) {
                 }
                 
                 if (job.status === 'completed') {
-                    clearInterval(pollInterval);
-                    
-                    // Final progress update
+                    // Final progress update - ensure we show 100%
                     progressBar.style.width = '100%';
                     progressPercent.textContent = '100';
                     progressBar.classList.add('bg-green-600');
                     progressBar.classList.remove('bg-purple-600', 'bg-blue-600');
-                    statusEl.textContent = '🎉 B-roll organization completed successfully!';
                     
-                    showNotification('B-roll organization completed successfully! <a href="/static/results.html" class="underline font-semibold">View Results</a>', 'success');
+                    // Update status based on job type
+                    if (type === 'ai') {
+                        statusEl.textContent = '🎉 AI image generation completed successfully!';
+                        showNotification('AI images generated successfully!', 'success');
+                    } else {
+                        statusEl.textContent = '🎉 B-roll organization completed successfully!';
+                        showNotification('B-roll organization completed successfully! <a href="/static/results.html" class="underline font-semibold">View Results</a>', 'success');
+                    }
+                    
+                    // Clear interval after a small delay to ensure final update is visible
+                    setTimeout(() => {
+                        clearInterval(pollInterval);
+                    }, 500);
                     
                     // Handle different job types
                     if (type === 'ai' && job.result) {
-                        displayGeneratedImages(job.result);
+                        displayGeneratedImages(job.result, jobId);
                     }
                     
                     if (type === 'broll' && job.result_url) {
@@ -744,10 +882,55 @@ function trackJob(jobId, type) {
             console.error('Failed to poll job status:', error);
             statusEl.textContent = '⚠️ Connection error. Retrying...';
         }
-    }, 2000);
+    }, 2000); // Poll every 2 seconds
+    
+    // Failsafe: If job gets stuck, increase polling frequency at high progress
+    setTimeout(() => {
+        if (progressPercent.textContent >= 85 && pollInterval) {
+            console.log('Increasing polling frequency for final progress updates');
+            clearInterval(pollInterval);
+            
+            // Poll more frequently for final updates
+            const fastPollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
+                    if (response.ok) {
+                        const job = await response.json();
+                        
+                        progressBar.style.width = `${job.progress}%`;
+                        progressPercent.textContent = job.progress;
+                        statusEl.textContent = job.message || 'Finalizing...';
+                        
+                        if (job.status === 'completed' || job.status === 'failed') {
+                            clearInterval(fastPollInterval);
+                            // Handle completion/failure as before
+                            if (job.status === 'completed') {
+                                progressBar.style.width = '100%';
+                                progressPercent.textContent = '100';
+                                progressBar.classList.add('bg-green-600');
+                                statusEl.textContent = type === 'ai' ? 
+                                    '🎉 AI image generation completed successfully!' : 
+                                    '🎉 B-roll organization completed successfully!';
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Fast poll error:', error);
+                }
+            }, 500); // Poll every 500ms for final updates
+        }
+    }, 30000); // Start fast polling after 30 seconds
 }
 
-function displayGeneratedImages(result) {
+// Global variable to store current images and script
+let currentImageData = {
+    images: [],
+    script: '',
+    currentIndex: 0,
+    jobId: null
+};
+
+function displayGeneratedImages(result, jobId) {
     // Show preview section
     const previewSection = document.getElementById('ai-preview-section');
     const previewGrid = document.getElementById('ai-preview-grid');
@@ -755,19 +938,42 @@ function displayGeneratedImages(result) {
     if (result && result.images && result.images.length > 0) {
         previewSection.classList.remove('hidden');
         
+        // Store image data for modal
+        currentImageData.images = result.images;
+        currentImageData.script = result.script_text || uploadedFiles.scriptText || 'Script content not available';
+        currentImageData.currentIndex = 0;
+        currentImageData.jobId = jobId;
+        
         // Clear existing previews
         previewGrid.innerHTML = '';
+        
+        // Add "View All" button at the top
+        const viewAllBtn = document.createElement('div');
+        viewAllBtn.className = 'col-span-full mb-4';
+        viewAllBtn.innerHTML = `
+            <button onclick="openImageModal()" class="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                <i class="fas fa-expand mr-2"></i>View All Images in Gallery
+            </button>
+        `;
+        previewGrid.appendChild(viewAllBtn);
         
         // Add image previews
         result.images.forEach((imagePath, index) => {
             const imageDiv = document.createElement('div');
-            imageDiv.className = 'relative group';
+            imageDiv.className = 'relative group cursor-pointer';
+            imageDiv.onclick = () => openImageModal(index);
             imageDiv.innerHTML = `
                 <img src="${apiUrl(`/api/files/serve/${imagePath}`)}" alt="Generated Image ${index + 1}" 
                      class="w-full h-48 object-cover rounded-lg shadow-md hover:shadow-xl transition-shadow">
                 <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-opacity rounded-lg flex items-center justify-center">
+                    <div class="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span class="bg-white px-3 py-1 rounded text-sm"><i class="fas fa-search-plus mr-1"></i>View</span>
+                    </div>
+                </div>
+                <div class="absolute bottom-2 right-2">
                     <a href="${apiUrl(`/api/files/serve/${imagePath}`)}" download 
-                       class="opacity-0 group-hover:opacity-100 transition-opacity bg-white px-3 py-1 rounded text-sm">
+                       class="opacity-0 group-hover:opacity-100 transition-opacity bg-white px-2 py-1 rounded text-xs"
+                       onclick="event.stopPropagation()">
                         <i class="fas fa-download mr-1"></i>Download
                     </a>
                 </div>
@@ -936,3 +1142,274 @@ function showNotification(message, type = 'info') {
 
 // Make closeModal available globally
 window.closeModal = closeModal;
+
+// Test upload function for debugging
+async function testUpload(file) {
+    console.log('Testing upload with file:', file.name, 'Size:', file.size);
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+        const response = await fetch(apiUrl('/api/test-upload'), {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        console.log('Test upload result:', result);
+        return result;
+    } catch (error) {
+        console.error('Test upload error:', error);
+        return { error: error.message };
+    }
+}
+
+// Make testUpload available globally for debugging
+window.testUpload = testUpload;
+
+// Direct upload test function
+async function testDirectUpload(files) {
+    console.log('=== DIRECT UPLOAD TEST ===');
+    console.log('Files:', files);
+    console.log('Files type:', typeof files);
+    console.log('Is FileList?', files instanceof FileList);
+    
+    if (!files || files.length === 0) {
+        console.error('No files provided');
+        return;
+    }
+    
+    const file = files[0];
+    console.log('File:', file);
+    console.log('File type:', typeof file);
+    console.log('Is File?', file instanceof File);
+    
+    try {
+        // Test basic file properties
+        console.log('Testing file properties...');
+        console.log('- name:', file.name);
+        console.log('- size:', file.size);
+        console.log('- type:', file.type);
+        console.log('- lastModified:', file.lastModified);
+        
+        // Test FormData
+        console.log('Testing FormData...');
+        const formData = new FormData();
+        formData.append('file', file);
+        console.log('FormData created successfully');
+        
+        // Test simple upload
+        console.log('Testing upload to /api/test-upload...');
+        const response = await fetch(apiUrl('/api/test-upload'), {
+            method: 'POST',
+            body: formData
+        });
+        
+        console.log('Response status:', response.status);
+        const result = await response.json();
+        console.log('Response data:', result);
+        
+        if (response.ok) {
+            showNotification('Test upload successful!', 'success');
+        } else {
+            showNotification('Test upload failed: ' + (result.error || 'Unknown error'), 'error');
+        }
+        
+    } catch (error) {
+        console.error('Test upload error:', error);
+        console.error('Error type:', error.constructor.name);
+        console.error('Error stack:', error.stack);
+        showNotification('Test upload error: ' + error.message, 'error');
+    }
+}
+
+// Make it globally available
+window.testDirectUpload = testDirectUpload;
+
+// Image Modal Functions
+function openImageModal(startIndex = 0) {
+    console.log('Opening image modal with index:', startIndex);
+    
+    if (currentImageData.images.length === 0) {
+        showNotification('No images to display', 'error');
+        return;
+    }
+    
+    currentImageData.currentIndex = startIndex;
+    
+    // Update modal content
+    const modal = document.getElementById('image-viewer-modal');
+    const promptText = document.getElementById('image-prompt-text');
+    const imagesGrid = document.getElementById('generated-images-grid');
+    const generationInfo = document.getElementById('generation-info');
+    
+    // Set prompt/script text
+    promptText.textContent = currentImageData.script;
+    
+    // Clear and populate images grid
+    imagesGrid.innerHTML = '';
+    currentImageData.images.forEach((imagePath, index) => {
+        const imageContainer = document.createElement('div');
+        imageContainer.className = 'relative group';
+        imageContainer.innerHTML = `
+            <div class="aspect-w-16 aspect-h-9 bg-gray-200 rounded-lg overflow-hidden">
+                <img src="${apiUrl(`/api/files/serve/${imagePath}`)}" 
+                     alt="Generated Image ${index + 1}" 
+                     class="w-full h-full object-contain cursor-pointer hover:opacity-95 transition-opacity"
+                     onclick="viewFullImage('${imagePath}')">
+            </div>
+            <div class="mt-2 flex justify-between items-center">
+                <span class="text-sm text-gray-600">Image ${index + 1}</span>
+                <a href="${apiUrl(`/api/files/serve/${imagePath}`)}" 
+                   download="generated_image_${index + 1}.png"
+                   class="text-blue-600 hover:text-blue-800 text-sm">
+                    <i class="fas fa-download mr-1"></i>Download
+                </a>
+            </div>
+        `;
+        imagesGrid.appendChild(imageContainer);
+    });
+    
+    // Update generation info
+    generationInfo.textContent = `Generated ${currentImageData.images.length} images`;
+    
+    // Show modal
+    showModal('image-viewer-modal');
+}
+
+function viewFullImage(imagePath) {
+    // Open image in new tab for full view
+    window.open(apiUrl(`/api/files/serve/${imagePath}`), '_blank');
+}
+
+function previousImage() {
+    if (currentImageData.currentIndex > 0) {
+        currentImageData.currentIndex--;
+        updateImageDisplay();
+    }
+}
+
+function nextImage() {
+    if (currentImageData.currentIndex < currentImageData.images.length - 1) {
+        currentImageData.currentIndex++;
+        updateImageDisplay();
+    }
+}
+
+function updateImageDisplay() {
+    // This function would be used if we had a single-image view
+    // Currently we're showing all images in a grid
+    const counter = document.getElementById('image-counter');
+    counter.textContent = `${currentImageData.currentIndex + 1} / ${currentImageData.images.length}`;
+}
+
+// Make functions globally available
+window.openImageModal = openImageModal;
+window.viewFullImage = viewFullImage;
+window.previousImage = previousImage;
+window.nextImage = nextImage;
+
+// Video Creation Functions
+async function createVideoFromImages() {
+    if (!currentImageData.jobId) {
+        showNotification('No images available for video creation', 'error');
+        return;
+    }
+    
+    const createVideoBtn = document.getElementById('create-video-btn');
+    createVideoBtn.disabled = true;
+    createVideoBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Creating Video...';
+    
+    try {
+        const createClips = document.getElementById('create-clips').checked;
+        const createFullVideo = document.getElementById('create-full-video').checked;
+        
+        if (!createClips && !createFullVideo) {
+            showNotification('Please select at least one video option', 'error');
+            createVideoBtn.disabled = false;
+            createVideoBtn.innerHTML = '<i class="fas fa-video mr-2"></i>Create Video';
+            return;
+        }
+        
+        const requestData = {
+            original_job_id: currentImageData.jobId,
+            create_clips: createClips,
+            create_full_video: createFullVideo
+        };
+        
+        const response = await fetch(apiUrl('/api/generate/video'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            showNotification('Video creation started!', 'success');
+            
+            // Show video progress section
+            const videoProgressSection = document.getElementById('video-progress-section');
+            if (videoProgressSection) {
+                videoProgressSection.classList.remove('hidden');
+            }
+            
+            // Track video creation job
+            trackVideoJob(data.job_id);
+        } else {
+            const error = await response.json();
+            showNotification(error.detail || 'Failed to start video creation', 'error');
+        }
+    } catch (error) {
+        console.error('Error creating video:', error);
+        showNotification('Error: ' + error.message, 'error');
+    } finally {
+        createVideoBtn.disabled = false;
+        createVideoBtn.innerHTML = '<i class="fas fa-video mr-2"></i>Create Video';
+    }
+}
+
+function trackVideoJob(jobId) {
+    const progressBar = document.getElementById('video-progress-bar');
+    const progressPercent = document.getElementById('video-progress-percent');
+    const statusEl = document.getElementById('video-status');
+    
+    // Poll for job status
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
+            
+            if (response.ok) {
+                const job = await response.json();
+                
+                // Update progress
+                progressBar.style.width = `${job.progress}%`;
+                progressPercent.textContent = job.progress;
+                statusEl.textContent = job.message || 'Processing...';
+                
+                if (job.status === 'completed') {
+                    clearInterval(pollInterval);
+                    
+                    // Final progress update
+                    progressBar.style.width = '100%';
+                    progressPercent.textContent = '100';
+                    statusEl.textContent = '🎉 Video creation completed!';
+                    
+                    showNotification('Video created successfully! <a href="/static/results.html" class="underline font-semibold">View Results</a>', 'success');
+                    
+                    if (job.result_url) {
+                        showDownloadLink(job.result_url, 'video');
+                    }
+                    
+                } else if (job.status === 'failed') {
+                    clearInterval(pollInterval);
+                    statusEl.textContent = `❌ Failed: ${job.message}`;
+                    showNotification('Video creation failed: ' + job.message, 'error');
+                }
+            }
+        } catch (error) {
+            console.error('Failed to poll video job status:', error);
+        }
+    }, 2000);
+}
