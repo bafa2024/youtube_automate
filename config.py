@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     
     # File limits
     MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024 * 1024  # 5GB (for 60-minute videos)
+    MAX_VOICEOVER_SIZE: int = 500 * 1024 * 1024  # 500MB specifically for voiceover files
     ALLOWED_SCRIPT_EXTENSIONS: List[str] = [".txt", ".docx"]
     ALLOWED_AUDIO_EXTENSIONS: List[str] = [".mp3", ".wav", ".m4a"]
     ALLOWED_VIDEO_EXTENSIONS: List[str] = [".mp4", ".avi", ".mov", ".mkv"]
@@ -48,6 +49,7 @@ class Settings(BaseSettings):
     # Processing limits
     MAX_IMAGES_PER_JOB: int = 20
     MAX_VIDEO_DURATION: int = 3600  # 60 minutes in seconds
+    MAX_VOICEOVER_DURATION: int = 3600  # 60 minutes in seconds for voiceover files
     FILE_RETENTION_DAYS: int = 7
     
     # CORS

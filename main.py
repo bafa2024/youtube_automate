@@ -262,16 +262,23 @@ async def upload_audio(
             raise HTTPException(400, "Only .mp3, .wav, and .m4a files are supported")
         # Read file content and check size
         content = await file.read()
-        max_size = getattr(settings, 'MAX_UPLOAD_SIZE', 5 * 1024 * 1024 * 1024)  # 5GB default
+        max_size = getattr(settings, 'MAX_VOICEOVER_SIZE', 500 * 1024 * 1024)  # 500MB for voiceover files
         if len(content) > max_size:
-            logger.error(f"File too large: {len(content)} bytes (limit: {max_size} bytes)")
-            raise HTTPException(413, f"File too large. Max allowed size is {max_size // (1024*1024)} MB.")
+            logger.error(f"Voiceover file too large: {len(content)} bytes (limit: {max_size} bytes)")
+            raise HTTPException(413, f"Voiceover file too large. Max allowed size is {max_size // (1024*1024)} MB.")
         # Save file
         file_info = await save_upload_file(file, "audio")
         audio_processor = AudioProcessor()
         try:
             duration = audio_processor.get_duration(file_info["saved_path"])
             file_info["duration"] = duration
+            
+            # Check duration limit for voiceover files
+            max_duration = getattr(settings, 'MAX_VOICEOVER_DURATION', 3600)  # 60 minutes
+            if duration and duration > max_duration:
+                logger.error(f"Voiceover duration too long: {duration} seconds (limit: {max_duration} seconds)")
+                raise HTTPException(413, f"Voiceover duration too long. Max allowed duration is {max_duration // 60} minutes.")
+                
         except Exception as e:
             logger.error(f"Failed to get audio duration: {e}")
             file_info["duration"] = None
