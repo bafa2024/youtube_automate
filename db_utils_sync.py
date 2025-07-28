@@ -42,13 +42,13 @@ def update_job_status_sync(job_id: str, status: str, message: str = None, progre
             cursor.execute(query, (status, message, progress, result_path, job_id))
         conn.commit()
 
-def create_job_sync(job_id: str, user_id: int, status: str, message: str, created_at: str, progress: int, result_path: str = None, job_type: str = None) -> int:
+def create_job_sync(job_id: str, status: str, message: str, created_at: str, progress: int, result_path: str = None, job_type: str = None) -> int:
     """Synchronous version of create_job"""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO jobs (job_id, user_id, status, message, created_at, progress, result_path, job_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (job_id, user_id, status, message, created_at, progress, result_path, job_type)
+            "INSERT INTO jobs (job_id, status, message, created_at, progress, result_path, job_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (job_id, status, message, created_at, progress, result_path, job_type)
         )
         conn.commit()
         return cursor.lastrowid

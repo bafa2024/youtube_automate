@@ -334,7 +334,6 @@ async def upload_script(
     
     upload_time = datetime.now().isoformat()
     await create_file(
-        user_id=None, # No user ID for public endpoints
         file_id=file_info["file_id"],
         filename=file_info["filename"],
         file_type="script",
@@ -419,7 +418,6 @@ async def upload_audio(
             file_info["duration"] = None
         try:
             await create_file(
-                user_id=None, # No user ID for public endpoints
                 file_id=file_info["file_id"],
                 filename=file_info["filename"],
                 file_type="audio",
@@ -496,7 +494,6 @@ async def upload_video(
         
         # Store in database
         await create_file(
-            user_id=None, # No user ID for public endpoints
             file_id=file_info["file_id"],
             filename=file_info["filename"],
             file_type=f"video_{video_type}",
@@ -567,7 +564,6 @@ async def generate_ai_images(
         try:
             await create_job(
                 job_id=job_id,
-                user_id=None, # No user ID for public endpoints
                 status="pending",
                 message="AI image generation job started",
                 created_at=created_at,
@@ -659,7 +655,6 @@ async def create_video_from_images(
         created_at = datetime.now().isoformat()
         await create_job(
             job_id=job_id,
-            user_id=None,
             status="pending",
             message="Video creation job started",
             created_at=created_at,
@@ -750,7 +745,6 @@ async def organize_broll(
     created_at = datetime.now().isoformat()
     await create_job(
         job_id=job_id,
-        user_id=None, # No user ID for public endpoints
         status="pending",
         message="B-roll organization job started",
         created_at=created_at,
@@ -814,9 +808,9 @@ async def list_jobs(
     skip: int = 0,
     limit: int = 10,
 ):
-    """List user's jobs"""
-    from db_utils import get_user_jobs
-    jobs = await get_user_jobs(None, skip, limit) # No user ID for public endpoints
+    """List all jobs"""
+    from db_utils import get_all_jobs
+    jobs = await get_all_jobs(skip, limit)
     job_responses = []
     for job in jobs:
         # Parse result if it exists

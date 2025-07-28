@@ -61,7 +61,6 @@ class CallbackTask(Task):
     
     def __init__(self):
         self.job_id = None
-        self.user_id = None
     
     def update_progress(self, progress: int, message: str = ""):
         """Update job progress in database and notify via WebSocket"""
@@ -84,12 +83,11 @@ class CallbackTask(Task):
         if redis_client:
             update_data = {
                 "job_id": self.job_id,
-                "user_id": self.user_id,
                 "progress": progress,
                 "message": message,
                 "timestamp": datetime.utcnow().isoformat()
             }
-            redis_client.publish(f"job_updates:{self.user_id}", json.dumps(update_data))
+            redis_client.publish("job_updates", json.dumps(update_data))
 
 # Synchronous task functions (no Redis required)
 def run_ai_images_task_sync(job_id: str, job_data: Dict[str, Any]):
@@ -475,7 +473,6 @@ def run_broll_task_sync(job_id: str, job_data: Dict[str, Any]):
 def generate_ai_images_task(self, job_id: str, job_data: Dict[str, Any]):
     """Background task for AI image generation"""
     self.job_id = job_id
-    self.user_id = job_data['user_id']
     
     try:
         # Update job status to processing
@@ -676,7 +673,6 @@ def generate_ai_images_task(self, job_id: str, job_data: Dict[str, Any]):
 def organize_broll_task(self, job_id: str, job_data: Dict[str, Any]):
     """Background task for B-roll organization"""
     self.job_id = job_id
-    self.user_id = job_data['user_id']
     
     try:
         # Update job status to processing

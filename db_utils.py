@@ -7,112 +7,73 @@ DB_PATH = "ai_video_tool.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        # Create settings table for single-user API key storage
         await db.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            hashed_password TEXT NOT NULL,
-            is_active INTEGER DEFAULT 1,
-            is_superuser INTEGER DEFAULT 0,
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            encrypted_api_key TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            encrypted_api_key TEXT
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )""")
+        
+        # Create files table without user_id
         await db.execute("""
         CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
             file_id TEXT,
             filename TEXT,
             file_type TEXT,
             file_path TEXT,
             size INTEGER,
-            upload_time TEXT,
-            FOREIGN KEY(user_id) REFERENCES users(id)
+            upload_time TEXT
         )""")
+        
+        # Create jobs table without user_id
         await db.execute("""
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id TEXT,
-            user_id INTEGER,
             status TEXT,
             message TEXT,
             created_at TEXT,
             progress INTEGER,
             result_path TEXT,
             job_type TEXT,
-            result TEXT,
-            FOREIGN KEY(user_id) REFERENCES users(id)
+            result TEXT
         )""")
         await db.commit()
 
-# User CRUD
-async def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
+# Settings CRUD (for API key storage)
+async def get_settings() -> Optional[Dict[str, Any]]:
+    """Get the single settings record"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM users WHERE username = ?", (username,)) as cursor:
+        async with db.execute("SELECT * FROM settings WHERE id = 1") as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+async def update_api_key(encrypted_api_key: str) -> bool:
+    """Update the API key in settings"""
     async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM users WHERE email = ?", (email,)) as cursor:
-            row = await cursor.fetchone()
-            return dict(row) if row else None
-
-async def create_user(username: str, email: str, hashed_password: str, is_superuser: int = 0) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO users (username, email, hashed_password, is_superuser) VALUES (?, ?, ?, ?)",
-            (username, email, hashed_password, is_superuser)
-        )
-        await db.commit()
-        async with db.execute("SELECT last_insert_rowid()") as cursor:
-            row = await cursor.fetchone()
-            return row[0] if row else None
-
-async def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM users WHERE id = ?", (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            return dict(row) if row else None
-
-async def verify_user_password(username: str, password: str, verify_func) -> Optional[Dict[str, Any]]:
-    user = await get_user_by_username(username)
-    if user and verify_func(password, user['hashed_password']):
-        return user
-    return None
-
-async def update_user_password(user_id: int, new_hashed_password: str) -> bool:
-    """Update user's password"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE users SET hashed_password = ? WHERE id = ?",
-            (new_hashed_password, user_id)
-        )
-        await db.commit()
-        return True
-
-async def update_user_api_key(user_id: int, encrypted_api_key: str) -> bool:
-    """Update user's encrypted API key"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE users SET encrypted_api_key = ? WHERE id = ?",
-            (encrypted_api_key, user_id)
-        )
+        # Insert or update the single settings record
+        await db.execute("""
+            INSERT INTO settings (id, encrypted_api_key, updated_at) 
+            VALUES (1, ?, ?) 
+            ON CONFLICT(id) DO UPDATE SET 
+                encrypted_api_key = excluded.encrypted_api_key,
+                updated_at = excluded.updated_at
+        """, (encrypted_api_key, datetime.now().isoformat()))
         await db.commit()
         return True
 
 # FILE CRUD
-async def create_file(user_id: int, file_id: str, filename: str, file_type: str, file_path: str, size: int, upload_time: str = None, file_metadata: Dict[str, Any] = None) -> int:
+async def create_file(file_id: str, filename: str, file_type: str, file_path: str, size: int, upload_time: str = None, file_metadata: Dict[str, Any] = None) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         if upload_time is None:
             upload_time = datetime.now().isoformat()
         await db.execute(
-            "INSERT INTO files (user_id, file_id, filename, file_type, file_path, size, upload_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (user_id, file_id, filename, file_type, file_path, size, upload_time)
+            "INSERT INTO files (file_id, filename, file_type, file_path, size, upload_time) VALUES (?, ?, ?, ?, ?, ?)",
+            (file_id, filename, file_type, file_path, size, upload_time)
         )
         await db.commit()
         async with db.execute("SELECT last_insert_rowid()") as cursor:
@@ -126,12 +87,23 @@ async def get_file_by_id(file_id: str) -> Optional[Dict[str, Any]]:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
+async def get_all_files(skip: int = 0, limit: int = 10) -> List[Dict[str, Any]]:
+    """Get all files with pagination"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM files ORDER BY upload_time DESC LIMIT ? OFFSET ?",
+            (limit, skip)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
 # JOB CRUD
-async def create_job(job_id: str, user_id: int, status: str, message: str, created_at: str, progress: int, result_path: str = None, job_type: str = None) -> int:
+async def create_job(job_id: str, status: str, message: str, created_at: str, progress: int, result_path: str = None, job_type: str = None) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO jobs (job_id, user_id, status, message, created_at, progress, result_path, job_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (job_id, user_id, status, message, created_at, progress, result_path, job_type)
+            "INSERT INTO jobs (job_id, status, message, created_at, progress, result_path, job_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (job_id, status, message, created_at, progress, result_path, job_type)
         )
         await db.commit()
         async with db.execute("SELECT last_insert_rowid()") as cursor:
@@ -145,23 +117,67 @@ async def get_job_by_id(job_id: str) -> Optional[Dict[str, Any]]:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-async def update_job_status(job_id: str, status: str, message: str = None, progress: int = None, result_path: str = None, result: Dict[str, Any] = None):
+async def update_job_status(job_id: str, status: str, message: str = None, progress: int = None, result_path: str = None, result_data: Dict[str, Any] = None) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
-        if result:
-            query = "UPDATE jobs SET status = ?, message = COALESCE(?, message), progress = COALESCE(?, progress), result_path = COALESCE(?, result_path), result = ? WHERE job_id = ?"
-            await db.execute(query, (status, message, progress, result_path, json.dumps(result), job_id))
-        else:
-            query = "UPDATE jobs SET status = ?, message = COALESCE(?, message), progress = COALESCE(?, progress), result_path = COALESCE(?, result_path) WHERE job_id = ?"
-            await db.execute(query, (status, message, progress, result_path, job_id))
+        updates = ["status = ?"]
+        params = [status]
+        if message is not None:
+            updates.append("message = ?")
+            params.append(message)
+        if progress is not None:
+            updates.append("progress = ?")
+            params.append(progress)
+        if result_path is not None:
+            updates.append("result_path = ?")
+            params.append(result_path)
+        if result_data is not None:
+            updates.append("result = ?")
+            params.append(json.dumps(result_data))
+        params.append(job_id)
+        
+        await db.execute(
+            f"UPDATE jobs SET {', '.join(updates)} WHERE job_id = ?",
+            params
+        )
         await db.commit()
 
-async def get_user_jobs(user_id: int, skip: int = 0, limit: int = 10) -> List[Dict[str, Any]]:
-    """Get user's jobs with pagination"""
+async def get_all_jobs(skip: int = 0, limit: int = 10) -> List[Dict[str, Any]]:
+    """Get all jobs with pagination"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (user_id, limit, skip)
+            "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, skip)
         ) as cursor:
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows] 
+            return [dict(row) for row in rows]
+
+# Clean up old user-related functions (kept for backward compatibility, but simplified)
+async def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
+    """Deprecated - returns None since we don't have users anymore"""
+    return None
+
+async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+    """Deprecated - returns None since we don't have users anymore"""
+    return None
+
+async def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
+    """Deprecated - returns None since we don't have users anymore"""
+    return None
+
+async def verify_user_password(username: str, password: str, verify_func) -> Optional[Dict[str, Any]]:
+    """Deprecated - returns None since we don't have users anymore"""
+    return None
+
+async def update_user_password(user_id: int, new_hashed_password: str) -> bool:
+    """Deprecated - returns False since we don't have users anymore"""
+    return False
+
+async def update_user_api_key(user_id: int, encrypted_api_key: str) -> bool:
+    """Deprecated - use update_api_key instead"""
+    return await update_api_key(encrypted_api_key)
+
+# Backward compatibility wrapper
+async def get_user_jobs(user_id: int, skip: int = 0, limit: int = 10) -> List[Dict[str, Any]]:
+    """Get all jobs - user_id parameter is ignored"""
+    return await get_all_jobs(skip, limit)
