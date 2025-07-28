@@ -311,18 +311,35 @@ def run_video_creation_task_sync(job_id: str, job_data: Dict[str, Any]):
             # Update progress
             update_job_status_sync(job_id, "processing", "Finalizing video...", 90)
         
-        # Prepare result data
+        # Prepare result data with video URLs
         result_data = {
             "clips_created": create_clips,
             "full_video_created": create_full_video,
             "output_dir": str(output_dir),
-            "results": results
+            "results": results,
+            "videos": {}
         }
         
+        # Add video paths for preview
         if 'clips' in results:
             result_data['clips_path'] = results['clips']
+            try:
+                # Convert to relative path for serving
+                clips_relative = Path(results['clips']).relative_to(Path(settings.RESULTS_DIR))
+                result_data['videos']['clips'] = f"results/{clips_relative.as_posix()}"
+            except:
+                # Fallback to full path if relative path fails
+                result_data['videos']['clips'] = results['clips']
+            
         if 'video' in results:
             result_data['video_path'] = results['video']
+            try:
+                # Convert to relative path for serving
+                video_relative = Path(results['video']).relative_to(Path(settings.RESULTS_DIR))
+                result_data['videos']['full_video'] = f"results/{video_relative.as_posix()}"
+            except:
+                # Fallback to full path if relative path fails
+                result_data['videos']['full_video'] = results['video']
         
         # Update job as completed
         update_job_status_sync(job_id, "completed", "Video creation completed!", 100, results.get('video', str(output_dir)), result_data)

@@ -1396,6 +1396,81 @@ async function createVideoFromImages() {
     }
 }
 
+function showVideoPreview(resultData) {
+    const previewSection = document.getElementById('video-preview-section');
+    const previewContainer = document.getElementById('video-preview-container');
+    
+    if (!previewSection || !previewContainer) {
+        console.error('Video preview elements not found');
+        return;
+    }
+    
+    // Clear previous content
+    previewContainer.innerHTML = '';
+    
+    // Parse result data if it's a string
+    let videoData = resultData;
+    if (typeof resultData === 'string') {
+        try {
+            videoData = JSON.parse(resultData);
+        } catch (e) {
+            console.error('Failed to parse result data:', e);
+            return;
+        }
+    }
+    
+    // Show the preview section
+    previewSection.classList.remove('hidden');
+    
+    // Add video players for each generated video
+    if (videoData.videos) {
+        Object.entries(videoData.videos).forEach(([key, videoPath]) => {
+            const videoWrapper = document.createElement('div');
+            videoWrapper.className = 'mb-6';
+            
+            // Create title
+            const title = document.createElement('h4');
+            title.className = 'text-md font-semibold mb-2 text-gray-700';
+            title.textContent = key === 'full_video' ? '🎬 Full Video with Voiceover' : 
+                               key === 'clips' ? '🎞️ Individual Clips' : key;
+            videoWrapper.appendChild(title);
+            
+            // Create video element
+            const video = document.createElement('video');
+            video.className = 'w-full rounded-lg shadow-md';
+            video.controls = true;
+            video.preload = 'metadata';
+            
+            // Handle both full paths and relative paths
+            const videoUrl = videoPath.startsWith('http') ? videoPath : apiUrl(`/files/${videoPath}`);
+            video.src = videoUrl;
+            
+            videoWrapper.appendChild(video);
+            
+            // Add download button
+            const downloadBtn = document.createElement('a');
+            downloadBtn.href = videoUrl;
+            downloadBtn.download = true;
+            downloadBtn.className = 'inline-block mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm';
+            downloadBtn.innerHTML = '<i class="fas fa-download mr-2"></i>Download ' + 
+                                  (key === 'full_video' ? 'Full Video' : 'Clips');
+            videoWrapper.appendChild(downloadBtn);
+            
+            previewContainer.appendChild(videoWrapper);
+        });
+    }
+    
+    // Add link to results page
+    const resultsLink = document.createElement('div');
+    resultsLink.className = 'mt-4 pt-4 border-t border-gray-200';
+    resultsLink.innerHTML = `
+        <a href="/static/results.html" class="inline-block px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+            <i class="fas fa-folder-open mr-2"></i>View All Results
+        </a>
+    `;
+    previewContainer.appendChild(resultsLink);
+}
+
 function trackVideoJob(jobId) {
     const progressBar = document.getElementById('video-progress-bar');
     const progressPercent = document.getElementById('video-progress-percent');
@@ -1422,7 +1497,12 @@ function trackVideoJob(jobId) {
                     progressPercent.textContent = '100';
                     statusEl.textContent = '🎉 Video creation completed!';
                     
-                    showNotification('Video created successfully! <a href="/static/results.html" class="underline font-semibold">View Results</a>', 'success');
+                    showNotification('Video created successfully!', 'success');
+                    
+                    // Show video preview
+                    if (job.result) {
+                        showVideoPreview(job.result);
+                    }
                     
                     if (job.result_url) {
                         showDownloadLink(job.result_url, 'video');
